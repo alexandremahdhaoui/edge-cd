@@ -1,0 +1,106 @@
+# -- defines how EdgeCD clone itself
+edgeCD:
+  autoUpdate:
+    enabled: true
+  repo:
+    # -- clone url (default: https://github.com/alexandremahdhaoui/edge-cd.git)
+    url: ""
+    # -- branch to checkout
+    branch: ""
+    # -- repo destination path (default: /usr/local/src/edge-cd)
+    destinationPath: ""
+
+config:
+  path: ./devices/${HOSTNAME}
+  filename: config.yaml
+  repo:
+    url: git@github.com:alexandremahdhaoui/deployment.git
+    branch: main
+    destinationPath: /usr/local/src/deployment
+
+pollingIntervalSecond: 60
+
+extraEnvs:
+  - HOME: /root
+  - GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new"
+
+packageManager:
+  # -- name to select your package manager
+  # [ "opkg", "CUSTOM"]
+  name: opkg
+  autoUpgrade: false
+
+  # -- specify packages to install
+  requiredPackages:
+    - quagga-bgpd
+    - quagga-zebra
+    - quagga-vtysh
+    - quagga-libzebra
+
+  # -- set customPackageManager is you select .packageManager=CUSTOM
+  customPackageManager:
+    commands:
+      # -- command to update package manager repos
+      update: ""  # "opkg update"
+      # -- command to install packages
+      install: ""  # "opkg installed"
+      # -- [Optional] command to upgrade packages
+      upgrade: ""  # "opkg upgrade"
+
+# -- Sync directories
+directories:
+  # -- Binaries
+  - sourceDir: bin
+    destDir: /usr/bin
+    fileMod: 755
+    restartServicesMap: {}
+
+  # -- OpenWRT Config
+  - sourceDir: config
+    destDir: /etc/config
+    fileMod: 644
+    restartServicesMap:
+      dhcp:
+        - odhcpd
+        - dnsmasq
+      firewall:
+        - firewall
+      network:
+        - network
+      router-sync:
+        - router-sync
+    rebootOnChange:
+      - system
+
+  # -- Services
+  - type: dir
+    sourceDir: services
+    destDir: /etc/init.d
+    fileMod: 755
+    restartServicesMap: {}
+
+# -- Sync single files
+files:
+  - type: files
+    srcPath: files/quagga_bgpd.conf
+    destPath: /etc/quagga/bgpd.conf
+    # TODO: implement syncBehavior instead of restartServices
+    # syncBehavior:
+    #   restartServices: ["quagga"] # restart "edge-cd" to restart this process
+    #   reboot: false
+    restartServices:
+      - quagga
+
+  - srcPath: files/quagga_zebra.conf
+    destPath: /etc/quagga/zebra.conf
+    restartServices:
+      - quagga
+
+  - srcPath: files/etc_hosts
+    destPath: /etc/hosts
+
+  - destPath: /etc/rc.local
+    content: |
+      . /lib/functions/gl_util.sh
+      remount_ubifs
+

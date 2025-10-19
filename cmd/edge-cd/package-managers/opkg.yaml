@@ -1,0 +1,3 @@
+update: "opkg update"
+install: "opkg install"
+upgrade: "opkg upgrade"

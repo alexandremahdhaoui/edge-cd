@@ -1,0 +1,426 @@
+#!/usr/bin/env bash
+#
+# Copyright 2025 Alexandre Mahdhaoui
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+. /etc/shinit
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o xtrace
+
+# ----------------------------------------------------------------
+# Imports
+# ----------------------------------------------------------------
+
+SRC_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+LIB_DIR="${SRC_DIR}/lib/"
+PKG_MGR_DIR="${SRC_DIR}/package-managers"
+
+# shellcheck source=./lib/config.sh
+# shellcheck source=./lib/lock.sh
+# shellcheck source=./lib/log.sh
+# shellcheck source=./lib/package_manager.sh
+# shellcheck source=./lib/state.sh
+
+. "${LIB_DIR}/config.sh"
+. "${LIB_DIR}/lock.sh"
+. "${LIB_DIR}/log.sh"
+. "${LIB_DIR}/state.sh"
+
+# ----------------------------------------------------------------
+# Envs
+# ----------------------------------------------------------------
+
+# -- variable required for bootstrapping
+CONFIG_PATH="${CONFIG_PATH:-/etc/edge-cd/config.yaml}"
+
+# ----------------------------------------------------------------
+# General config
+# ----------------------------------------------------------------
+# If config, edge-cd.sh or edge-cd.service files change we restart
+# the process (exit 0)
+
+__DEFAULT_EDGE_CD_REPO_BRANCH=main
+__DEFAULT_EDGE_CD_REPO_DESTINATION_PATH=/usr/local/src/edge-cd
+__DEFAULT_EDGE_CD_REPO_URL=https://github.com/alexandremahdhaoui/edge-cd.git
+
+__DEFAULT_EDGE_CD_COMMIT_PATH=/tmp/edge-cd/edge-cd-last-synchronized-commit.txt
+__DEFAULT_CONFIG_COMMIT_PATH=/tmp/edge-cd/config-last-synchronized-commit.txt
+
+function declare_config() {
+	# -- declare vars
+	declare CONFIG_FILENAME
+	declare CONFIG_PATH
+	declare CONFIG_REPO_BRANCH
+	declare CONFIG_REPO_DESTINATION_PATH
+	declare CONFIG_REPO_URL
+
+	declare EDGE_CD_REPO_BRANCH
+	declare EDGE_CD_REPO_DESTINATION_PATH
+	declare EDGE_CD_REPO_URL
+
+	declare EDGE_CD_COMMIT_PATH
+	declare CONFIG_COMMIT_PATH
+
+	# -- declare backup vars
+	declare __BACKUP_CONFIG_FILENAME
+	declare __BACKUP_CONFIG_PATH
+	declare __BACKUP_CONFIG_REPO_DESTINATION_PATH
+	declare __BACKUP_CONFIG_REPO_URL
+
+	declare __BACKUP_EDGE_CD_REPO_BRANCH
+	declare __BACKUP_EDGE_CD_REPO_DESTINATION_PATH
+	declare __BACKUP_EDGE_CD_REPO_URL
+
+	declare __BACKUP_EDGE_CD_COMMIT_PATH
+	declare __BACKUP_CONFIG_COMMIT_PATH
+}
+
+function init_config() {
+	__set_extra_envs
+
+	# -- user config
+	__BACKUP_CONFIG_FILENAME="$(read_config CONFIG_FILENAME '.config.filename')"
+	__BACKUP_CONFIG_PATH="$(read_config CONFIG_PATH '.config.path')"
+	__BACKUP_CONFIG_REPO_DESTINATION_PATH="$(read_config CONFIG_REPO_DESTINATION_PATH '.config.repo.destPath')"
+	__BACKUP_CONFIG_REPO_URL="$(read_config CONFIG_REPO_URL '.config.url')"
+
+	# -- edge config
+	__BACKUP_EDGE_CD_REPO_BRANCH="$(
+		read_config EDGE_CD_REPO_BRANCH '.edgeCD.repo.branch' "${__DEFAULT_EDGE_CD_REPO_BRANCH}"
+	)"
+
+	__BACKUP_EDGE_CD_REPO_DESTINATION_PATH="$(
+		read_config
+		EDGE_CD_REPO_DESTINATION_PATH
+		'.edgeCD.repo.destinationPath'
+		"${__DEFAULT_EDGE_CD_REPO_DESTINATION_PATH}"
+	)"
+
+	__BACKUP_EDGE_CD_REPO_URL="$(
+		read_config EDGE_CD_REPO_URL '.edgeCD.repo.url' "${__DEFAULT_EDGE_CD_REPO_URL}"
+	)"
+}
+
+function reset_config() {
+	__reset_extra_envs
+
+	CONFIG_FILENAME="${__BACKUP_CONFIG_FILENAME}"
+	CONFIG_PATH="${__BACKUP_CONFIG_PATH}"
+
+	CONFIG_REPO_BRANCH="${__BACKUP_CONFIG_REPO_BRANCH}"
+	CONFIG_REPO_DESTINATION_PATH="${__BACKUP_CONFIG_REPO_DESTINATION_PATH}"
+	CONFIG_REPO_URL="${__BACKUP_CONFIG_REPO_URL}"
+
+	EDGE_CD_REPO_BRANCH="${__BACKUP_EDGE_CD_REPO_BRANCH}"
+	EDGE_CD_REPO_DESTINATION_PATH="${__BACKUP_EDGE_CD_REPO_DESTINATION_PATH}"
+	EDGE_CD_REPO_URL="${__BACKUP_EDGE_CD_REPO_URL}"
+
+	EDGE_CD_COMMIT_PATH="${__BACKUP_EDGE_CD_COMMIT_PATH}"
+	CONFIG_COMMIT_PATH="${__BACKUP_CONFIG_COMMIT_PATH}"
+}
+
+# ----------------------------------------------------------------
+# R(un)T(ime) V(ariables) (RTV_)
+# ----------------------------------------------------------------
+
+function declare_runtime_variables() {
+	declare -A RTV_REQUIRE_SERVICE_RESTART
+	declare RTV_REQUIRE_SELF_RESTART
+	declare RTV_REQUIRE_REBOOT
+}
+
+function reset_runtime_variables() {
+	RTV_REQUIRE_SERVICE_RESTART=()
+	RTV_REQUIRE_SELF_RESTART=false
+	RTV_REQUIRE_REBOOT=false
+}
+
+# ----------------------------------------------------------------
+# EdgeCD repo
+# ----------------------------------------------------------------
+
+function clone_repo_edge_cd() {
+	echo Cloning repo...
+	git clone --filter=blob:none --no-checkout "${EDGE_CD_REPO_URL}" "${EDGE_CD_REPO_DESTINATION_PATH}"
+
+	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" sparse-checkout init
+	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" sparse-checkout set "cmd/edge-cd"
+	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" checkout "${EDGE_CD_REPO_BRANCH}"
+	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" fetch origin "${EDGE_CD_REPO_BRANCH}"
+	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" pull
+}
+
+function sync_repo_edge_cd() {
+	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" sparse-checkout set "cmd/edge-cd"
+	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" fetch origin "${EDGE_CD_REPO_BRANCH}"
+	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" reset --hard FETCH_HEAD
+}
+
+# ----------------------------------------------------------------
+# Config repo
+# ----------------------------------------------------------------
+
+function clone_repo_config() {
+	logInfo Cloning repo...
+	git clone --filter=blob:none --no-checkout "${CONFIG_REPO_URL}" "${CONFIG_REPO_DESTINATION_PATH}"
+
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout init
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" checkout "${CONFIG_REPO_BRANCH}"
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" pull
+}
+
+function sync_repo_config() {
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" reset --hard FETCH_HEAD
+}
+
+# ----------------------------------------------------------------
+# reconcile_files
+# ----------------------------------------------------------------
+
+function __reconcile_file() {
+	local srcPath="${1}"
+	local destPath="${2}"
+	local fileMod="${3}"
+	local restartServices="${4}"
+	local reboot="${5}"
+
+	# -- validate inputs
+	if [ -z "${srcPath}" ] || [ "${srcPath}" == "null" ]; then
+		logErr "srcPath must be specified"
+		exit 1
+	fi
+
+	srcPath="${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_PATH}/${srcPath}"
+
+	if [ -z "${destPath}" ] || [ "${destPath}" == "null" ]; then
+		logErr "srcPath must be specified"
+		exit 1
+	elif ! echo "${destPath}" | grep -q '^/'; then
+		logErr "destPath must be an absolute path"
+		exit 1
+	fi
+
+	# -- set defaults
+	if [ -z "${fileMod}" ] || [ "${fileMod}" == "null" ]; then fileMod=644; fi
+	if [ "${restartServices}" == "null" ]; then restartServices=""; fi
+
+	# -- compare src and dest
+	if cmp "${srcPath}" "${destPath}"; then
+		return 0
+	fi
+
+	logInfo "Drift detected: updating file \"${destPath}\""
+	# mark associated service for restart
+	local service
+	for service in ${restartServices}; do
+		set +u
+		RTV_REQUIRE_SERVICE_RESTART["${service}"]=1
+		set -u
+	done
+
+	# -- set require reboot flag
+	if [[ "${reboot}" == "true" ]]; then
+		RTV_REQUIRE_REBOOT=true
+	fi
+
+	cp -f "${srcPath}" "${destPath}"
+	chmod "${fileMod}" "${destPath}"
+}
+
+function __reconcile_file_mux() {
+	local fileSpec="${1}"
+
+	local type srcPath content destPath fileMod restartServices reboot
+	type="$(read_yaml_stdin '.type' "${fileSpec}")"
+	srcPath="$(read_yaml_stdin '.srcPath' "${fileSpec}")"
+	content="$(read_yaml_stdin '.content' "${fileSpec}")"
+	destPath="$(read_yaml_stdin '.destPath' "${fileSpec}")"
+	fileMod="$(read_yaml_stdin '.fileMod' "${fileSpec}")"
+	restartServices="$(read_yaml_stdin '.syncBehavior.restartServices' "${fileSpec}")"
+	reboot="$(read_yaml_stdin '.syncBehavior.reboot' "${fileSpec}")"
+
+	# TODO: Add a "git" type? E.g.: clone any repo and copy file from repo to the dest
+	case "${type}" in
+		file) ;;
+
+		# -- directory does not support recursive
+		directory)
+			find "${srcPath}" -type f ! -name '\.*' | while IFS= read -r srcPath; do
+				__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${reboot}"
+			done
+			;;
+
+		content)
+			# -- type content
+			srcPath="$(mktemp)"
+			echo "${content}" | tee &>/dev/null "${srcPath}"
+			;;
+
+		*)
+			logErr "Unknown type=\"${type}\" for destPath=\"${destPath}\""
+			exit 1
+			;;
+	esac
+
+	# -- sync file
+	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${reboot}"
+}
+
+# ----------------------------------------------------------------
+# sync_file_list
+# ----------------------------------------------------------------
+
+function reconcile_files() {
+	local -a files
+	readarray files < <(yq e -o=j -I=0 '.files[]' "${CONFIG_PATH}")
+
+	local fileSpec
+	for fileSpec in "${files[@]}"; do
+		__reconcile_file_mux "${fileSpec}"
+	done
+}
+
+# ----------------------------------------------------------------
+# sync_edge_cd
+# ----------------------------------------------------------------
+
+function reconcile_edge_cd() {
+	local sourcePath="${CONFIG_REPO_DESTINATION_PATH}/cmd/edge-cd"
+	local name=edge-cd
+
+	logInfo "Syncing EdgeCD"
+
+	# -- Always sync the scripts.
+	cp -f "${sourcePath}/${name}.service" "/etc/init.d/${name}"
+	cp -f "${sourcePath}/${name}" "/usr/bin/${name}"
+
+	# -- Ensure edge-cd is always is enabled
+	"/etc/init.d/${name}" enable
+
+	# -- Check if there was a new commit.
+	local lastCommit currentCommit
+	lastCommit=$(cat "${EDGE_CD_COMMIT_PATH}" || echo "")
+	currentCommit="$(git -C "${EDGE_CD_REPO_DESTINATION_PATH}" rev-parse HEAD)"
+
+	# -- Commit this change
+	mkdir -p "$(dirname "${EDGE_CD_COMMIT_PATH}")"
+	echo "${currentCommit}" | tee "${EDGE_CD_COMMIT_PATH}" &>/dev/null
+
+	[ "${lastCommit}" == "${currentCommit}" ] \
+		&& logInfo "EdgeCD is already synced" \
+		&& return
+
+	logInfo "EdgeCD is out of sync"
+	logInfo "Exiting EdgeCD"
+	exit 0
+}
+
+# ----------------------------------------------------------------
+# checkCommit
+# ----------------------------------------------------------------
+
+function is_commit_in_sync() {
+	local currentCommit lastCommit
+	lastCommit=$(cat "${CONFIG_COMMIT_PATH}" 2>/dev/null || echo "")
+	currentCommit="$(git -C "${CONFIG_REPO_DESTINATION_PATH}" rev-parse HEAD)"
+
+	if [ "${lastCommit}" == "${currentCommit}" ]; then
+		logInfo "Skipping synchronization: user config is already in sync with commit ${currentCommit}"
+		return 1 # Return non-zero status to signal skip
+	fi
+
+	logInfo "Starting configuration synchronization for commit ${currentCommit}"
+}
+
+function commit_last_change() {
+	local currentCommit
+	currentCommit="$(git -C "${CONFIG_REPO_DESTINATION_PATH}" rev-parse HEAD)"
+	echo "${currentCommit}" | tee &>/dev/null "${CONFIG_COMMIT_PATH}"
+	logInfo "Commit ${currentCommit} synced successfully"
+}
+
+# ----------------------------------------------------------------
+# Reconcile
+# ----------------------------------------------------------------
+
+function reconcile() {
+	reset_config
+	reset_extra_envs
+	reset_runtime_variables
+
+	[ -d "${EDGE_CD_REPO_DESTINATION_PATH}" ] || clone_repo_edge_cd
+	sync_repo_edge_cd
+
+	[ -d "${CONFIG_REPO_DESTINATION_PATH}" ] || clone_repo_config
+	sync_repo_config
+
+	auto_upgrade_packages
+	reconcile_edge_cd
+
+	# Check if the repository has been updated since the last successful sync.
+	if ! is_commit_in_sync; then
+		reconcile_packages
+		reconcile_files
+	fi
+
+	# -- Reboot if flag set
+	if [ "${RTV_REQUIRE_REBOOT}" == "true" ]; then
+		logInfo "Reboot flag set. Rebooting now."
+		reboot
+	fi
+
+	# -- restart services
+	for service in "${!RTV_REQUIRE_SERVICE_RESTART[@]}"; do
+		logInfo "Restarting service: ${service}"
+		service "${service}" enable &>/dev/null
+		service "${service}" restart &>/dev/null
+	done
+
+	local sleepTime
+	sleepTime="$(read_config '.pollingIntervalSecond' || echo "")"
+	if [ -z "${sleepTime}" ]; then
+		logWarn "Failed to read pollingIntervalSecond from config: Sleeping 60s" >&2
+		sleepTime=60
+	fi
+
+	sleep "${sleepTime}"
+}
+
+# ----------------------------------------------------------------
+# main
+# ----------------------------------------------------------------
+
+function main() {
+	lock
+	trap unlock EXIT
+
+	declare_config
+	init_config
+	set_extra_envs
+	declare_runtime_variables
+
+	while true; do
+		reconcile
+	done
+}
+
+main
