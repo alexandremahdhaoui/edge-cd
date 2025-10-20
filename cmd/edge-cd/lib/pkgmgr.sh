@@ -21,8 +21,8 @@
 
 declare -g __LOADED_LIB_PKGMGR=true
 SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
-LIB_DIR="${SRC_DIR}"
-PKGMGR_DIR="${SRC_DIR}/../package-managers"
+LIB_DIR="${SRC_DIR}/lib"
+PKGMGR_DIR="${SRC_DIR}/package-managers"
 
 # ------------------------------------------------------------------#
 # Imports
@@ -44,13 +44,13 @@ function __get_package_manager_config() {
 		exit 1
 	fi
 
-	configPath="${PKGMGR_DIR}/${pkgManager}"
-	if [ -f "${configPath}" ]; then
+	configPath="${PKGMGR_DIR}/${pkgManager}.yaml"
+	if [ ! -f "${configPath}" ]; then
 		logErr "Package manager \"${pkgManager}\" cannot be found"
 		exit 1
 	fi
 
-	read_yaml '.packageManager' "${configPath}"
+	yq -e -r '.' "${configPath}"
 }
 
 function reconcile_package_auto_upgrade() {
@@ -71,7 +71,13 @@ function reconcile_package_auto_upgrade() {
 	readarray -t upgrade < <(read_yaml_stdin '.upgrade[]' "${config}")
 
 	"${update[@]}"
-	"${upgrade[@]}"
+
+	local packages
+	packages="$(yq -e '.packageManager.requiredPackages[]' "${CONFIG_PATH}" || echo "")"
+	local -a packageArray
+	readarray -t packageArray <<<"${packages}"
+
+	"${upgrade[@]}" "${packageArray[@]}"
 }
 
 function reconcile_packages() {
@@ -84,7 +90,7 @@ function reconcile_packages() {
 	logInfo "Installing packages '${packages}'"
 
 	local -a packageArray
-	readarray -t packageArray <<< "${packages}"
+	readarray -t packageArray <<<"${packages}"
 
 	local config
 	config="$(__get_package_manager_config)"
@@ -97,3 +103,4 @@ function reconcile_packages() {
 	"${update[@]}"
 	"${install[@]}" "${packageArray[@]}"
 }
+

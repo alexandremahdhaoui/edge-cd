@@ -11,12 +11,8 @@ set -o pipefail
 SRC_DIR_OF_THIS_SCRIPT="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 LIB_DIR="${SRC_DIR_OF_THIS_SCRIPT}/../../../cmd/edge-cd/lib"
 
-# Mock dependencies before sourcing the script
-logInfo() { :; }
-read_config() { :; }
-read_yaml_file() { :; }
-
 # Source the script to be tested
+# Dependencies are not mocked to test the actual functionality.
 source "${LIB_DIR}/svcmgr.sh"
 
 # --- Mocks ---
@@ -81,10 +77,17 @@ assert_equals() {
 # --- Test Cases ---
 
 mock_restart() { echo "restart_called $*"; }
+export -f mock_restart
 
 test_restart_service() {
-    __read_svc_mgr_config() { echo -e "mock_restart\n__SERVICE_NAME__"; }
-    export -f __read_svc_mgr_config mock_restart
+    echo "serviceManager: { name: procd }" > "${CONFIG_PATH}"
+    mkdir -p "${SVCMGR_DIR}"
+    cat > "${SVCMGR_DIR}/procd" <<EOF
+commands:
+  restart:
+    - mock_restart
+    - __SERVICE_NAME__
+EOF
 
     local output
     output="$(restart_service "myservice")"
@@ -92,10 +95,17 @@ test_restart_service() {
 }
 
 mock_enable() { echo "enable_called $*"; }
+export -f mock_enable
 
 test_enable_service() {
-    __read_svc_mgr_config() { echo -e "mock_enable\n__SERVICE_NAME__"; }
-    export -f __read_svc_mgr_config mock_enable
+    echo "serviceManager: { name: procd }" > "${CONFIG_PATH}"
+    mkdir -p "${SVCMGR_DIR}"
+    cat > "${SVCMGR_DIR}/procd" <<EOF
+commands:
+  enable:
+    - mock_enable
+    - __SERVICE_NAME__
+EOF
 
     local output
     output="$(enable_service "myservice")"

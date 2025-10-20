@@ -10,6 +10,7 @@ set -o pipefail
 # --- Setup ---
 SRC_DIR_OF_THIS_SCRIPT="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 LIB_DIR="${SRC_DIR_OF_THIS_SCRIPT}/../../../cmd/edge-cd/lib"
+source "${LIB_DIR}/log.sh"
 source "${LIB_DIR}/lock.sh"
 
 export SCRIPT_NAME="edge-cd"
@@ -18,8 +19,6 @@ export SCRIPT_NAME="edge-cd"
 export LOCK_FILE_DIRNAME
 LOCK_FILE_DIRNAME="$(mktemp -d)"
 
-logInfo() { :; }
-logErr() { :; } # Suppress log messages for tests
 
 # Mock ps
 ps() {

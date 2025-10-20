@@ -55,10 +55,11 @@ function lock() {
 		# previous process is not running, we can take over lock
 	fi
 
+	mkdir -p "$(dirname "${lockFilePath}")"
 	echo "${$}" > "${lockFilePath}"
 }
 
 function unlock() {
-	logInfo "Unlocking '${SCRIPT_NAME}'"
+	logInfo "Unlocking 'EdgeCD'"
 	rm -f "$(__get_lock_file_path)"
 }

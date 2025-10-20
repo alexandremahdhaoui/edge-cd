@@ -1,5 +1,5 @@
 commands:
-  enable: ["service", "__SERVICE_NAME__", "enable"]
+  enable: ["/etc/init.d/__SERVICE_NAME__", "enable"]
   restart: ["service", "__SERVICE_NAME__", "restart"]
 
 # -- please note that the source path of the service must be:

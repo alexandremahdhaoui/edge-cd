@@ -15,12 +15,7 @@ source "${LIB_DIR}/config.sh"
 # --- Mocks ---
 export CONFIG_PATH
 CONFIG_PATH="$(mktemp)"
-# Mock yq will be defined per-test
-yq() {
-    echo "[ERROR] yq mock not defined for this test" >&2
-    return 1
-}
-export -f yq
+# yq is not mocked to test real yq command.
 
 # --- Test Runner ---
 TEST_COUNT=0
@@ -87,13 +82,7 @@ test_read_value_from_env() {
 }
 
 test_read_value_from_config() {
-    yq() {
-        assert_equals "-e" "$1" "yq arg 1"
-        assert_equals ".some.path" "$2" "yq arg 2"
-        assert_equals "${CONFIG_PATH}" "$3" "yq arg 3"
-        echo "config_value"
-    }
-    export -f yq
+    echo "some: {path: config_value}" > "${CONFIG_PATH}"
     export MY_VAR_EMPTY=""
 
     local result
@@ -102,8 +91,7 @@ test_read_value_from_config() {
 }
 
 test_read_value_from_default_with_bug() {
-    yq() { echo "null"; }
-    export -f yq
+    echo "some: {path: null}" > "${CONFIG_PATH}"
     export MY_VAR_EMPTY=""
 
     local result
@@ -121,8 +109,7 @@ test_read_value_from_default_with_bug() {
 
 test_read_value_precedence_env_over_config() {
     export MY_VAR="env_value"
-    yq() { echo "config_value"; }
-    export -f yq
+    echo "some: {path: config_value}" > "${CONFIG_PATH}"
 
     local result
     result="$(read_value "MY_VAR" ".some.path" "default")"
@@ -131,8 +118,7 @@ test_read_value_precedence_env_over_config() {
 }
 
 test_read_value_precedence_config_over_default() {
-    yq() { echo "config_value"; }
-    export -f yq
+    echo "some: {path: config_value}" > "${CONFIG_PATH}"
     export MY_VAR_EMPTY=""
 
     local result
@@ -141,8 +127,7 @@ test_read_value_precedence_config_over_default() {
 }
 
 test_read_value_no_value_fails() {
-    yq() { return 1; }
-    export -f yq
+    >"${CONFIG_PATH}" # Create an empty file
     export MY_VAR_EMPTY=""
 
     local status=0
@@ -158,12 +143,6 @@ extraEnvs:
   - VAR1: "value1"
   - VAR2: "value2"
 EOF
-    yq() {
-        # Simulate yq extracting envs from the config file
-        echo 'VAR1=value1'
-        echo 'VAR2=value2'
-    }
-    export -f yq
 
     # Test set_extra_envs
     set_extra_envs
@@ -185,11 +164,6 @@ extraEnvs:
   - EXISTING_VAR: "new_value"
   - NEW_VAR: "a_value"
 EOF
-    yq() {
-        echo 'EXISTING_VAR=new_value'
-        echo 'NEW_VAR=a_value'
-    }
-    export -f yq
 
     # Test set_extra_envs
     set_extra_envs
@@ -204,20 +178,6 @@ EOF
 }
 
 test_read_yaml_stdin() {
-    yq() {
-        assert_equals "-e" "$1" "yq arg 1"
-        assert_equals ".a.b" "$2" "yq arg 2"
-        # Simulate yq reading from stdin and processing
-        local content
-        content="$(cat)"
-        if [[ "${content}" == "$(echo -e "a:\n  b: value")" ]]; then
-            echo "value"
-        else
-            echo "unexpected stdin for yq mock" >&2
-            return 1
-        fi
-    }
-    export -f yq
     local result
     result="$(read_yaml_stdin ".a.b" "a:\n  b: value")"
     assert_equals "value" "${result}" "read_yaml_stdin should get correct value from yq"
@@ -225,17 +185,22 @@ test_read_yaml_stdin() {
 
 test_read_yaml_file() {
     echo "a: {b: value}" >"${CONFIG_PATH}"
-    yq() {
-        assert_equals "-e" "$1" "yq arg 1"
-        assert_equals ".a.b" "$2" "yq arg 2"
-        assert_equals "${CONFIG_PATH}" "$3" "yq arg 3"
-        echo "value"
-    }
-    export -f yq
 
     local result
     result="$(read_yaml_file ".a.b" "${CONFIG_PATH}")"
     assert_equals "value" "${result}" "read_yaml_file should call yq with correct arguments"
+}
+
+test_set_extra_envs_no_envs_in_config() {
+    # Setup
+    cat >"${CONFIG_PATH}" <<EOF
+some_other_key: value
+EOF
+# yq is not mocked, so no need to unset.
+
+    # Test set_extra_envs
+    set_extra_envs
+    assert_equals "" "$(echo "${BACKUP_EXTRA_ENVS[*]}")" "BACKUP_EXTRA_ENVS should be empty"
 }
 
 # --- Main ---
@@ -249,5 +214,6 @@ run_test test_set_and_reset_extra_envs
 run_test test_set_and_reset_extra_envs_with_backup
 run_test test_read_yaml_stdin
 run_test test_read_yaml_file
+run_test test_set_extra_envs_no_envs_in_config
 
 report_results
