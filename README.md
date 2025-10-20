@@ -2,9 +2,7 @@
 
 ## Why EdgeCD?
 
-Configuration files, device packages, and environment variables for embedded systems must be **declarative** and **version controlled**.
-
-The deployment lifecycle, synchronization, and health reconciliation for distributed routers and IoT agents must be **automated**, **auditable**, and **self-correcting** without relying on push-based updates or manual interventions.
+The deployment lifecycle, synchronization, and health reconciliation for routers, IoT agents, bare-metal servers or edge computers must be **automated**, **auditable**, and **self-correcting** without relying on push-based updates or manual interventions.
 
 **EdgeCD** automates the entire lifecycle of edge devices by continuously monitoring a Git repository for declarative configuration changes (packages, files, scripts). It performs a full state reconciliation, including dependency checks, file synchronization, service restarts, and conditional device reboots, ensuring that the physical fleet's state always matches the desired state defined in Git.
 
@@ -23,7 +21,7 @@ The functionality of **EdgeCD** provides significant benefits across different e
 ### DevOps Engineers
 
 * **GitOps Workflow:** **EdgeCD** establishes a **GitOps pipeline** where configuration changes are pulled from the repository. This aligns with modern DevOps principles:
-  ***Declarative Configuration:** The router's desired state is declared in a YAML file (`router-sync.yaml`).
+  ***Declarative Configuration:** The router's desired state is declared in a YAML file (`edge-cd.yaml`).
   * **Version Control:** Every change is tracked, reviewed, and audited via Git.
   * **Automated Delivery:** **EdgeCD** automates the continuous pulling, comparison, and application of configuration.
 * **Consistency and Scale:** The template-based approach (using the device's hostname to target a specific configuration folder: `clusters/${HOSTNAME}/`) allows DevOps teams to manage a large fleet of heterogeneous devices with a single repository, ensuring **consistency and scalable deployment**.

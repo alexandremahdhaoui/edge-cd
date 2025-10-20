@@ -24,19 +24,22 @@ extraEnvs:
   - HOME: /root
   - GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new"
 
+serviceManager:
+  # -- name of your service manager
+  # [ "procd", "systemd" ]
+  name: procd
+
 packageManager:
   # -- name to select your package manager
   # [ "opkg", "CUSTOM"]
   name: opkg
   autoUpgrade: false
-
   # -- specify packages to install
   requiredPackages:
     - quagga-bgpd
     - quagga-zebra
     - quagga-vtysh
     - quagga-libzebra
-
   # -- set customPackageManager is you select .packageManager=CUSTOM
   customPackageManager:
     commands:

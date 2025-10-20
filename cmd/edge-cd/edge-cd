@@ -26,20 +26,16 @@ set -o xtrace
 # Imports
 # ----------------------------------------------------------------
 
-SRC_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
-LIB_DIR="${SRC_DIR}/lib/"
-PKG_MGR_DIR="${SRC_DIR}/package-managers"
+SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
+LIB_DIR="${SRC_DIR}/lib"
+PKGMGR_DIR="${SRC_DIR}/package-managers"
+SVCMGR_DIR="${SRC_DIR}/service-managers"
 
-# shellcheck source=./lib/config.sh
-# shellcheck source=./lib/lock.sh
-# shellcheck source=./lib/log.sh
-# shellcheck source=./lib/package_manager.sh
-# shellcheck source=./lib/state.sh
-
-. "${LIB_DIR}/config.sh"
-. "${LIB_DIR}/lock.sh"
-. "${LIB_DIR}/log.sh"
-. "${LIB_DIR}/state.sh"
+[ -z "${__LOADED_LIB_CONFIG:-}" ] && . "${LIB_DIR}/config.sh"
+[ -z "${__LOADED_LIB_LOCK:-}" ] && . "${LIB_DIR}/lock.sh"
+[ -z "${__LOADED_LIB_LOG:-}" ] && . "${LIB_DIR}/log.sh"
+[ -z "${__LOADED_LIB_PKGMGR:-}" ] && . "${LIB_DIR}/pkgmgr.sh"
+[ -z "${__LOADED_LIB_SVCMGR:-}" ] && . "${LIB_DIR}/svcmgr.sh"
 
 # ----------------------------------------------------------------
 # Envs
@@ -155,7 +151,7 @@ function reset_runtime_variables() {
 # ----------------------------------------------------------------
 
 function clone_repo_edge_cd() {
-	echo Cloning repo...
+	logInfo "Cloning EdgeCD repo"
 	git clone --filter=blob:none --no-checkout "${EDGE_CD_REPO_URL}" "${EDGE_CD_REPO_DESTINATION_PATH}"
 
 	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" sparse-checkout init
@@ -166,6 +162,7 @@ function clone_repo_edge_cd() {
 }
 
 function sync_repo_edge_cd() {
+	logInfo "Pulling EdgeCD repo"
 	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" sparse-checkout set "cmd/edge-cd"
 	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" fetch origin "${EDGE_CD_REPO_BRANCH}"
 	git -C "${EDGE_CD_REPO_DESTINATION_PATH}" reset --hard FETCH_HEAD
@@ -176,7 +173,7 @@ function sync_repo_edge_cd() {
 # ----------------------------------------------------------------
 
 function clone_repo_config() {
-	logInfo Cloning repo...
+	logInfo "Cloning config repo"
 	git clone --filter=blob:none --no-checkout "${CONFIG_REPO_URL}" "${CONFIG_REPO_DESTINATION_PATH}"
 
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout init
@@ -187,6 +184,7 @@ function clone_repo_config() {
 }
 
 function sync_repo_config() {
+	logInfo "Pulling config repo"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" reset --hard FETCH_HEAD
@@ -201,7 +199,7 @@ function __reconcile_file() {
 	local destPath="${2}"
 	local fileMod="${3}"
 	local restartServices="${4}"
-	local reboot="${5}"
+	local requireReboot="${5}"
 
 	# -- validate inputs
 	if [ -z "${srcPath}" ] || [ "${srcPath}" == "null" ]; then
@@ -238,7 +236,7 @@ function __reconcile_file() {
 	done
 
 	# -- set require reboot flag
-	if [[ "${reboot}" == "true" ]]; then
+	if [[ "${requireReboot}" == "true" ]]; then
 		RTV_REQUIRE_REBOOT=true
 	fi
 
@@ -249,14 +247,14 @@ function __reconcile_file() {
 function __reconcile_file_mux() {
 	local fileSpec="${1}"
 
-	local type srcPath content destPath fileMod restartServices reboot
+	local type srcPath content destPath fileMod restartServices requireReboot
 	type="$(read_yaml_stdin '.type' "${fileSpec}")"
 	srcPath="$(read_yaml_stdin '.srcPath' "${fileSpec}")"
 	content="$(read_yaml_stdin '.content' "${fileSpec}")"
 	destPath="$(read_yaml_stdin '.destPath' "${fileSpec}")"
 	fileMod="$(read_yaml_stdin '.fileMod' "${fileSpec}")"
 	restartServices="$(read_yaml_stdin '.syncBehavior.restartServices' "${fileSpec}")"
-	reboot="$(read_yaml_stdin '.syncBehavior.reboot' "${fileSpec}")"
+	requireReboot="$(read_yaml_stdin '.syncBehavior.reboot' "${fileSpec}")"
 
 	# TODO: Add a "git" type? E.g.: clone any repo and copy file from repo to the dest
 	case "${type}" in
@@ -265,7 +263,7 @@ function __reconcile_file_mux() {
 		# -- directory does not support recursive
 		directory)
 			find "${srcPath}" -type f ! -name '\.*' | while IFS= read -r srcPath; do
-				__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${reboot}"
+				__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
 			done
 			;;
 
@@ -282,7 +280,7 @@ function __reconcile_file_mux() {
 	esac
 
 	# -- sync file
-	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${reboot}"
+	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
 }
 
 # ----------------------------------------------------------------
@@ -290,6 +288,8 @@ function __reconcile_file_mux() {
 # ----------------------------------------------------------------
 
 function reconcile_files() {
+	logInfo "Reconciling files"
+
 	local -a files
 	readarray files < <(yq e -o=j -I=0 '.files[]' "${CONFIG_PATH}")
 
@@ -304,17 +304,33 @@ function reconcile_files() {
 # ----------------------------------------------------------------
 
 function reconcile_edge_cd() {
+	logInfo "Reconciling EdgeCD"
+
 	local sourcePath="${CONFIG_REPO_DESTINATION_PATH}/cmd/edge-cd"
 	local name=edge-cd
 
-	logInfo "Syncing EdgeCD"
+	local srcPath
+	local destPath
+	local fileMod
+	local restartServices
+	local requireReboot
 
-	# -- Always sync the scripts.
-	cp -f "${sourcePath}/${name}.service" "/etc/init.d/${name}"
-	cp -f "${sourcePath}/${name}" "/usr/bin/${name}"
+	# -- Always sync the scripts and service
+	srcPath="${sourcePath}/${name}"
+	destPath="/usr/bin/${name}"
+	fileMod=731
+	restartServices="${name}"
+	requireReboot=false
+	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
 
-	# -- Ensure edge-cd is always is enabled
-	"/etc/init.d/${name}" enable
+	# -- Ensure edge-cd is always enabled
+	srcPath="${sourcePath}/${name}.service"
+	destPath="/etc/init.d/${name}"
+	fileMod=620
+	restartServices="${name}"
+	requireReboot=false
+	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
+	enable_service "${name}"
 
 	# -- Check if there was a new commit.
 	local lastCommit currentCommit
@@ -324,14 +340,6 @@ function reconcile_edge_cd() {
 	# -- Commit this change
 	mkdir -p "$(dirname "${EDGE_CD_COMMIT_PATH}")"
 	echo "${currentCommit}" | tee "${EDGE_CD_COMMIT_PATH}" &>/dev/null
-
-	[ "${lastCommit}" == "${currentCommit}" ] \
-		&& logInfo "EdgeCD is already synced" \
-		&& return
-
-	logInfo "EdgeCD is out of sync"
-	logInfo "Exiting EdgeCD"
-	exit 0
 }
 
 # ----------------------------------------------------------------
@@ -355,46 +363,14 @@ function commit_last_change() {
 	local currentCommit
 	currentCommit="$(git -C "${CONFIG_REPO_DESTINATION_PATH}" rev-parse HEAD)"
 	echo "${currentCommit}" | tee &>/dev/null "${CONFIG_COMMIT_PATH}"
-	logInfo "Commit ${currentCommit} synced successfully"
+	logInfo "Synced commit \"${currentCommit}\" successfully"
 }
 
 # ----------------------------------------------------------------
-# Reconcile
+# polling_backoff
 # ----------------------------------------------------------------
 
-function reconcile() {
-	reset_config
-	reset_extra_envs
-	reset_runtime_variables
-
-	[ -d "${EDGE_CD_REPO_DESTINATION_PATH}" ] || clone_repo_edge_cd
-	sync_repo_edge_cd
-
-	[ -d "${CONFIG_REPO_DESTINATION_PATH}" ] || clone_repo_config
-	sync_repo_config
-
-	auto_upgrade_packages
-	reconcile_edge_cd
-
-	# Check if the repository has been updated since the last successful sync.
-	if ! is_commit_in_sync; then
-		reconcile_packages
-		reconcile_files
-	fi
-
-	# -- Reboot if flag set
-	if [ "${RTV_REQUIRE_REBOOT}" == "true" ]; then
-		logInfo "Reboot flag set. Rebooting now."
-		reboot
-	fi
-
-	# -- restart services
-	for service in "${!RTV_REQUIRE_SERVICE_RESTART[@]}"; do
-		logInfo "Restarting service: ${service}"
-		service "${service}" enable &>/dev/null
-		service "${service}" restart &>/dev/null
-	done
-
+function polling_backoff() {
 	local sleepTime
 	sleepTime="$(read_config '.pollingIntervalSecond' || echo "")"
 	if [ -z "${sleepTime}" ]; then
@@ -402,7 +378,44 @@ function reconcile() {
 		sleepTime=60
 	fi
 
+	logInfo "Sleeping for ${sleepTime} seconds"
 	sleep "${sleepTime}"
+}
+
+# ----------------------------------------------------------------
+# Reconcile
+# ----------------------------------------------------------------
+
+function reconcile() {
+	[ -d "${EDGE_CD_REPO_DESTINATION_PATH}" ] || clone_repo_edge_cd
+	sync_repo_edge_cd
+
+	[ -d "${CONFIG_REPO_DESTINATION_PATH}" ] || clone_repo_config
+	sync_repo_config
+
+	# Check if the repository has been updated since the last
+	# successful sync.
+	if ! is_commit_in_sync; then
+		# only re-install packages on new commits as drift detection
+		# is not yet implemented
+		reconcile_packages
+	fi
+
+	reconcile_package_auto_upgrade
+	reconcile_edge_cd
+	reconcile_files
+
+	# -- Reboot if flag set
+	if [ "${RTV_REQUIRE_REBOOT}" == "true" ]; then
+		logInfo "Rebooting now"
+		reboot
+	fi
+
+	# -- restart services
+	for service in "${!RTV_REQUIRE_SERVICE_RESTART[@]}"; do
+		enable_service "${service}"
+		restart_service "${service}"
+	done
 }
 
 # ----------------------------------------------------------------
@@ -419,7 +432,13 @@ function main() {
 	declare_runtime_variables
 
 	while true; do
+		reset_config
+		reset_extra_envs
+		reset_runtime_variables
+
 		reconcile
+
+		polling_backoff
 	done
 }
 

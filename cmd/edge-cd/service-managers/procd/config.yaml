@@ -1,0 +1,9 @@
+commands:
+  enable: ["service", "__SERVICE_NAME__", "enable"]
+  restart: ["service", "__SERVICE_NAME__", "restart"]
+
+# -- please note that the source path of the service must be:
+# "cmd/edge-cd/service-managers/SERVICE_MANAGER_NAME/service"
+edgeCDService:
+  # -- destination path of the service file
+  destinationPath: '/etc/init.d/edge-cd'

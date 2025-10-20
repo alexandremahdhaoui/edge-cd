@@ -16,6 +16,13 @@
 #
 
 # ------------------------------------------------------------------#
+# Preambule
+# ------------------------------------------------------------------#
+
+declare -g __LOADED_LIB_CONFIG=true
+SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
+
+# ------------------------------------------------------------------#
 # Extra Envs
 # ------------------------------------------------------------------#
 
@@ -44,7 +51,7 @@ function reset_extra_envs() {
 			backup_value=$(printf '%s' "${!backup_name}")
 			declare -gx "$var_name=$backup_value"
 		else
-			logWarn "Backup variable $backup_name not found. Skipping reset for $var_name."
+			echo "[WARN] Backup variable $backup_name not found: Skipping reset for $var_name" >&2
 		fi
 	done
 }
@@ -67,19 +74,25 @@ function read_yaml_file() {
 
 function read_config() {
 	local yamlPath="${1}"
-	read_yaml_file "${CONFIG_PATH}"
+	read_yaml_file "${yamlPath}" "${CONFIG_PATH}"
 }
 
 # -- reads config in the following order of precedence:
 #    1. Environment variables
 #    2. Config
-#    3. [not implemented yet] Default value
+#    3. Default value
 function read_value() {
 	local env="${1}"
 	local yamlPath="${2}"
 	local defaultValue="${3:-""}"
 
 	local valueFromConfig
-	valueFromConfig="$(read_config "${yamlPath}")"
+
+	if [ -z "${defaultValue}" ]; then
+		valueFromConfig="$(read_config "${yamlPath}")"
+	else
+		valueFromConfig="$(read_config "${yamlPath}" || true)"
+	fi
+
 	echo "${!env:-${valueFromConfig:-${defaultValue}}}"
 }
