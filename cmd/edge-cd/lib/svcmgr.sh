@@ -21,8 +21,8 @@
 
 declare -g __LOADED_LIB_SVCMGR=true
 SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
-LIB_DIR="${SRC_DIR}/lib"
-SVCMGR_DIR="${SRC_DIR}/service-managers"
+LIB_DIR="${SRC_DIR}"
+SVCMGR_DIR="${SRC_DIR}/../service-managers"
 
 # ------------------------------------------------------------------#
 # Imports
@@ -55,7 +55,7 @@ function restart_service() {
 	logInfo "Restarting service \"${serviceName}\""
 
 	local -a cmd
-	readarray cmd < <(__read_svc_mgr_config '.commands.restart' | sed "s/__SERVICE_NAME__/${serviceName}/g")
+	readarray -t cmd < <(__read_svc_mgr_config '.commands.restart' | sed "s/__SERVICE_NAME__/${serviceName}/g")
 	"${cmd[@]}"
 }
 
@@ -64,6 +64,6 @@ function enable_service() {
 	logInfo "Enabling service \"${serviceName}\""
 
 	local -a cmd
-	readarray cmd < <(__read_svc_mgr_config '.commands.enable' | sed "s/__SERVICE_NAME__/${serviceName}/g")
+	readarray -t cmd < <(__read_svc_mgr_config '.commands.enable' | sed "s/__SERVICE_NAME__/${serviceName}/g")
 	"${cmd[@]}"
 }

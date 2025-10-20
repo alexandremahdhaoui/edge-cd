@@ -21,8 +21,8 @@
 
 declare -g __LOADED_LIB_PKGMGR=true
 SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
-LIB_DIR="${SRC_DIR}/lib"
-PKGMGR_DIR="${SRC_DIR}/package-managers"
+LIB_DIR="${SRC_DIR}"
+PKGMGR_DIR="${SRC_DIR}/../package-managers"
 
 # ------------------------------------------------------------------#
 # Imports
@@ -67,8 +67,8 @@ function reconcile_package_auto_upgrade() {
 
 	local -a update
 	local -a upgrade
-	readarray update < <(read_yaml_stdin '.update[]' "${config}")
-	readarray upgrade < <(read_yaml_stdin '.upgrade[]' "${config}")
+	readarray -t update < <(read_yaml_stdin '.update[]' "${config}")
+	readarray -t upgrade < <(read_yaml_stdin '.upgrade[]' "${config}")
 
 	"${update[@]}"
 	"${upgrade[@]}"
@@ -84,15 +84,15 @@ function reconcile_packages() {
 	logInfo "Installing packages '${packages}'"
 
 	local -a packageArray
-	IFS=$'\n' read -r -a packageArray <<<"${packages}"
+	readarray -t packageArray <<< "${packages}"
 
 	local config
 	config="$(__get_package_manager_config)"
 
 	local -a install
 	local -a update
-	readarray install < <(read_yaml_stdin '.install[]' "${config}")
-	readarray update < <(read_yaml_stdin '.update[]' "${config}")
+	readarray -t install < <(read_yaml_stdin '.install[]' "${config}")
+	readarray -t update < <(read_yaml_stdin '.update[]' "${config}")
 
 	"${update[@]}"
 	"${install[@]}" "${packageArray[@]}"

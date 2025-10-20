@@ -1,3 +1,5 @@
+#### NB: EdgeCD comes from `router-sync` a personal project I developed in 2024 to automate the configuration of my routers
+
 # router-sync
 
 `router-sync` can be deployed on a router using [bootstrap-router](../bootstrap-router/README.md).

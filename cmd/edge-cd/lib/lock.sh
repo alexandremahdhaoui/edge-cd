@@ -55,7 +55,7 @@ function lock() {
 		# previous process is not running, we can take over lock
 	fi
 
-	echo "${$}" "${lockFilePath}"
+	echo "${$}" > "${lockFilePath}"
 }
 
 function unlock() {

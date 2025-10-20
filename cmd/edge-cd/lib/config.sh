@@ -26,17 +26,26 @@ SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
 # Extra Envs
 # ------------------------------------------------------------------#
 
+declare -ga BACKUP_EXTRA_ENVS
+
 function set_extra_envs() {
-	declare -a BACKUP_EXTRA_ENVS
+	# Clear the list of variables to reset from any previous run
+	BACKUP_EXTRA_ENVS=()
 
 	local key value
 	while IFS='=' read -r key value; do
 		[[ -z "$key" ]] && continue # skip malformed lines
-		declare -x "$key=$value"
 
 		BACKUP_EXTRA_ENVS+=("$key")
-		backup_key="__BACKUP_${key}"
-		declare "$backup_key=$value"
+		local backup_key="__BACKUP_${key}"
+		if [[ -v "$key" ]]; then
+			# Backup the current value.
+			declare -g "$backup_key=${!key}"
+		else
+			# Use a special marker to indicate the variable was originally unset.
+			declare -g "$backup_key=__WAS_UNSET__"
+		fi
+
 		declare -gx "$key=$value"
 	done < <(yq -e '.extraEnvs[] | to_entries[] | "\(.key)=\(.value)"' "${CONFIG_PATH}")
 }
@@ -45,11 +54,13 @@ function reset_extra_envs() {
 	for var_name in "${BACKUP_EXTRA_ENVS[@]}"; do
 		local backup_name="__BACKUP_${var_name}"
 
-		# Check if the backup variable is set
-		if [[ -v $backup_name ]]; then
-			local backup_value
-			backup_value=$(printf '%s' "${!backup_name}")
-			declare -gx "$var_name=$backup_value"
+		if [[ -v "$backup_name" ]]; then
+			local backup_value="${!backup_name}"
+			if [[ "$backup_value" == "__WAS_UNSET__" ]]; then
+				unset "$var_name"
+			else
+				declare -gx "$var_name=$backup_value"
+			fi
 		else
 			echo "[WARN] Backup variable $backup_name not found: Skipping reset for $var_name" >&2
 		fi
@@ -63,7 +74,7 @@ function reset_extra_envs() {
 function read_yaml_stdin() {
 	local yamlPath="${1}"
 	local yamlContent="${2}"
-	echo "${yamlContent}" | yq -e "${yamlPath}"
+	echo -e "${yamlContent}" | yq -e "${yamlPath}"
 }
 
 function read_yaml_file() {
@@ -80,19 +91,38 @@ function read_config() {
 # -- reads config in the following order of precedence:
 #    1. Environment variables
 #    2. Config
-#    3. Default value
+#    3. [Optional] Default value
+# The function fails if there is no value var in envs
+# or in the yamlPath and if specfied in the default value
+# A value equal to "null" is treated like an unset or empty value,
+# unless it is the default value.
 function read_value() {
-	local env="${1}"
+	local env_var_name="${1}"
 	local yamlPath="${2}"
 	local defaultValue="${3:-""}"
 
-	local valueFromConfig
-
-	if [ -z "${defaultValue}" ]; then
-		valueFromConfig="$(read_config "${yamlPath}")"
-	else
-		valueFromConfig="$(read_config "${yamlPath}" || true)"
+	# 1. Check Environment Variable
+	if [[ -n "${env_var_name}" ]]; then
+		if [[ -n "${!env_var_name}" ]] && [[ "${!env_var_name}" != "null" ]]; then
+			printf '%s' "${!env_var_name}"
+			return
+		fi
 	fi
 
-	echo "${!env:-${valueFromConfig:-${defaultValue}}}"
+	# 2. Check Configuration File
+	local valueFromConfig
+	valueFromConfig="$(read_config "${yamlPath}" 2>/dev/null || true)"
+
+	if [[ -n "${valueFromConfig}" && "${valueFromConfig}" != "null" ]]; then
+		printf '%s' "${valueFromConfig}"
+		return
+	fi
+
+	# 3. Use Default Value
+	if [[ -n "${defaultValue}" ]]; then
+		printf '%s' "${defaultValue}"
+	fi
+
+	echo 1>&2 "[ERROR] cannot read value from config; args: env_var_name=${env_var_name}, !env_var_name=${!env_var_name}, yamlPath=${yamlPath}, defaultValue=${defaultValue}"
+	exit 1
 }
