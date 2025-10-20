@@ -1,11 +1,22 @@
 # TODOs
 
-| Goals                              | Status   |
+## Dashboard
+
+#### Open tasks
+
+| Tasks                              | Status   |
 |------------------------------------|----------|
 | [001] Add support for systemd      | `OPEN`   |
 | [002] Create edgectl bootstrap cmd | `OPEN`   |
 | [003] Update examples/config.yaml  | `OPEN`   |
+| [004] Implement unit tests         | `OPEN`   |
+| [005] Implement test w/ container  | `OPEN`   |
 | Step-by-step update mode           | `OPEN`   |
+
+#### Closed tasks
+
+| Tasks                              | Status   |
+|------------------------------------|----------|
 | [000] Implement service manager    | `CLOSED` |
 | Clone repo to /usr/local/          | `CLOSED` |
 | Support lib files                  | `CLOSED` |
@@ -14,13 +25,15 @@
 | Persist config in /etc/            | `CLOSED` |
 | Allow configuring variables        | `CLOSED` |
 
-## [001] Add support for systemd
+## Task descriptions
+
+#### [001] Add support for systemd
 
 Requires:
 
 - [000] support for dynamic service manager configuration.
 
-## [002] Step-by-step update mode
+#### [002] Step-by-step update mode
 
 This mode ensures that each commits are applied atomically in their sequence.
 
