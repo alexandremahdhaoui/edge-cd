@@ -57,6 +57,10 @@ __DEFAULT_EDGE_CD_REPO_URL=https://github.com/alexandremahdhaoui/edge-cd.git
 __DEFAULT_EDGE_CD_COMMIT_PATH=/tmp/edge-cd/edge-cd-last-synchronized-commit.txt
 __DEFAULT_CONFIG_COMMIT_PATH=/tmp/edge-cd/config-last-synchronized-commit.txt
 
+__DEFAULT_CONFIG_REPO_BRANCH=main
+__DEFAULT_CONFIG_REPO_DESTINATION_PATH=/usr/local/src/edge-cd-config
+__DEFAULT_CONFIG_REPO_URL=https://github.com/alexandremahdhaoui/edge-cd-config.git
+
 function declare_config() {
 	# -- declare vars
 	declare CONFIG_FILENAME
@@ -87,33 +91,28 @@ function declare_config() {
 }
 
 function init_config() {
-	__set_extra_envs
+	set_extra_envs
 
 	# -- user config
-	__BACKUP_CONFIG_FILENAME="$(read_config CONFIG_FILENAME '.config.filename')"
-	__BACKUP_CONFIG_PATH="$(read_config CONFIG_PATH '.config.path')"
-	__BACKUP_CONFIG_REPO_DESTINATION_PATH="$(read_config CONFIG_REPO_DESTINATION_PATH '.config.repo.destPath')"
-	__BACKUP_CONFIG_REPO_URL="$(read_config CONFIG_REPO_URL '.config.url')"
+	__BACKUP_CONFIG_FILENAME="$(read_value CONFIG_FILENAME '.config.filename')"
+	__BACKUP_CONFIG_PATH="$(read_value CONFIG_PATH '.config.path')"
+	__BACKUP_CONFIG_REPO_BRANCH="$(read_value CONFIG_REPO_BRANCH '.config.repo.branch' "${__DEFAULT_CONFIG_REPO_BRANCH}")"
+	__BACKUP_CONFIG_REPO_DESTINATION_PATH="$(read_value CONFIG_REPO_DESTINATION_PATH '.config.repo.destPath' "${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}")"
+	__BACKUP_CONFIG_REPO_URL="$(read_value CONFIG_REPO_URL '.config.repo.url' "${__DEFAULT_CONFIG_REPO_URL}")"
 
 	# -- edge config
-	__BACKUP_EDGE_CD_REPO_BRANCH="$(
-		read_config EDGE_CD_REPO_BRANCH '.edgeCD.repo.branch' "${__DEFAULT_EDGE_CD_REPO_BRANCH}"
-	)"
+	__BACKUP_EDGE_CD_REPO_BRANCH="$(read_value EDGE_CD_REPO_BRANCH '.edgeCD.repo.branch' "${__DEFAULT_EDGE_CD_REPO_BRANCH}")"
 
-	__BACKUP_EDGE_CD_REPO_DESTINATION_PATH="$(
-		read_config
-		EDGE_CD_REPO_DESTINATION_PATH
-		'.edgeCD.repo.destinationPath'
-		"${__DEFAULT_EDGE_CD_REPO_DESTINATION_PATH}"
-	)"
+	__BACKUP_EDGE_CD_REPO_DESTINATION_PATH="$(read_value EDGE_CD_REPO_DESTINATION_PATH '.edgeCD.repo.destinationPath' "${__DEFAULT_EDGE_CD_REPO_DESTINATION_PATH}")"
 
-	__BACKUP_EDGE_CD_REPO_URL="$(
-		read_config EDGE_CD_REPO_URL '.edgeCD.repo.url' "${__DEFAULT_EDGE_CD_REPO_URL}"
-	)"
+	__BACKUP_EDGE_CD_REPO_URL="$(read_value EDGE_CD_REPO_URL '.edgeCD.repo.url' "${__DEFAULT_EDGE_CD_REPO_URL}")"
+
+	__BACKUP_EDGE_CD_COMMIT_PATH="$(read_value EDGE_CD_COMMIT_PATH '.edgeCD.commitPath' "${__DEFAULT_EDGE_CD_COMMIT_PATH}")"
+	__BACKUP_CONFIG_COMMIT_PATH="$(read_value CONFIG_COMMIT_PATH '.config.commitPath' "${__DEFAULT_CONFIG_COMMIT_PATH}")"
 }
 
 function reset_config() {
-	__reset_extra_envs
+	reset_extra_envs
 
 	CONFIG_FILENAME="${__BACKUP_CONFIG_FILENAME}"
 	CONFIG_PATH="${__BACKUP_CONFIG_PATH}"
@@ -135,13 +134,13 @@ function reset_config() {
 # ----------------------------------------------------------------
 
 function declare_runtime_variables() {
-	declare -A RTV_REQUIRE_SERVICE_RESTART
+	declare RTV_REQUIRE_SERVICE_RESTART
 	declare RTV_REQUIRE_SELF_RESTART
 	declare RTV_REQUIRE_REBOOT
 }
 
 function reset_runtime_variables() {
-	RTV_REQUIRE_SERVICE_RESTART=()
+	RTV_REQUIRE_SERVICE_RESTART=""
 	RTV_REQUIRE_SELF_RESTART=false
 	RTV_REQUIRE_REBOOT=false
 }
@@ -173,6 +172,10 @@ function sync_repo_edge_cd() {
 # ----------------------------------------------------------------
 
 function clone_repo_config() {
+	if [[ "${CONFIG_REPO_URL}" == "file://"* ]]; then
+		logInfo "Using local file-based repository for config. This is a non-production option. Skipping git clone."
+		return 0
+	fi
 	logInfo "Cloning config repo"
 	git clone --filter=blob:none --no-checkout "${CONFIG_REPO_URL}" "${CONFIG_REPO_DESTINATION_PATH}"
 
@@ -184,6 +187,10 @@ function clone_repo_config() {
 }
 
 function sync_repo_config() {
+	if [[ "${CONFIG_REPO_URL}" == "file://"* ]]; then
+		logInfo "Using local file-based repository for config. This is a non-production configuration option. Skipping git pull."
+		return 0
+	fi
 	logInfo "Pulling config repo"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
@@ -207,8 +214,6 @@ function __reconcile_file() {
 		exit 1
 	fi
 
-	srcPath="${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_PATH}/${srcPath}"
-
 	if [ -z "${destPath}" ] || [ "${destPath}" == "null" ]; then
 		logErr "srcPath must be specified"
 		exit 1
@@ -229,9 +234,13 @@ function __reconcile_file() {
 	logInfo "Drift detected: updating file \"${destPath}\""
 	# mark associated service for restart
 	local service
-	for service in ${restartServices}; do
+	local -a servicesToRestart
+	readarray -t servicesToRestart < <(echo "${restartServices}" | yq -e -r '.[]' || true)
+
+	for service in "${servicesToRestart[@]}"; do
 		set +u
-		RTV_REQUIRE_SERVICE_RESTART["${service}"]=1
+		echo $service
+		RTV_REQUIRE_SERVICE_RESTART+="${service}\n"
 		set -u
 	done
 
@@ -249,12 +258,24 @@ function __reconcile_file_mux() {
 
 	local type srcPath content destPath fileMod restartServices requireReboot
 	type="$(read_yaml_stdin '.type' "${fileSpec}")"
-	srcPath="$(read_yaml_stdin '.srcPath' "${fileSpec}")"
-	content="$(read_yaml_stdin '.content' "${fileSpec}")"
+
+	case "${type}" in
+		file | directory)
+			srcPath="$(read_yaml_stdin '.srcPath' "${fileSpec}")"
+			;;
+		content)
+			content="$(read_yaml_stdin '.content' "${fileSpec}")"
+			;;
+		*)
+			logErr "Unknown type=\"${type}\" for destPath=\"${destPath}\""
+			exit 1
+			;;
+	esac
+
 	destPath="$(read_yaml_stdin '.destPath' "${fileSpec}")"
-	fileMod="$(read_yaml_stdin '.fileMod' "${fileSpec}")"
-	restartServices="$(read_yaml_stdin '.syncBehavior.restartServices' "${fileSpec}")"
-	requireReboot="$(read_yaml_stdin '.syncBehavior.reboot' "${fileSpec}")"
+	fileMod="$(read_yaml_stdin_optional '.fileMod' "${fileSpec}")"
+	restartServices="$(read_yaml_stdin_optional '.syncBehavior.restartServices' "${fileSpec}")"
+	requireReboot="$(read_yaml_stdin_optional '.syncBehavior.reboot' "${fileSpec}")"
 
 	# TODO: Add a "git" type? E.g.: clone any repo and copy file from repo to the dest
 	case "${type}" in
@@ -280,6 +301,9 @@ function __reconcile_file_mux() {
 	esac
 
 	# -- sync file
+	if [[ "${type}" == "file" || "${type}" == "directory" ]]; then
+		srcPath="${CONFIG_REPO_DESTINATION_PATH}/${srcPath}"
+	fi
 	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
 }
 
@@ -306,7 +330,7 @@ function reconcile_files() {
 function reconcile_edge_cd() {
 	logInfo "Reconciling EdgeCD"
 
-	local sourcePath="${CONFIG_REPO_DESTINATION_PATH}/cmd/edge-cd"
+	local sourcePath="${EDGE_CD_REPO_DESTINATION_PATH}/cmd/edge-cd"
 	local name=edge-cd
 
 	local srcPath
@@ -324,9 +348,9 @@ function reconcile_edge_cd() {
 	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
 
 	# -- Ensure edge-cd is always enabled
-	srcPath="${sourcePath}/${name}.service"
+	srcPath="$(__get_svc_mgr_path)/service"
 	destPath="/etc/init.d/${name}"
-	fileMod=620
+	fileMod=755
 	restartServices="${name}"
 	requireReboot=false
 	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
@@ -347,6 +371,10 @@ function reconcile_edge_cd() {
 # ----------------------------------------------------------------
 
 function is_commit_in_sync() {
+	if [[ "${CONFIG_REPO_URL}" == "file://"* ]]; then
+		logInfo "Using local file-based repository for config. Skipping commit synchronization."
+		return 1 # Return non-zero status to signal skip
+	fi
 	local currentCommit lastCommit
 	lastCommit=$(cat "${CONFIG_COMMIT_PATH}" 2>/dev/null || echo "")
 	currentCommit="$(git -C "${CONFIG_REPO_DESTINATION_PATH}" rev-parse HEAD)"
@@ -412,7 +440,10 @@ function reconcile() {
 	fi
 
 	# -- restart services
-	for service in "${!RTV_REQUIRE_SERVICE_RESTART[@]}"; do
+	local -a servicesToRestart
+	readarray -t servicesToRestart < <(echo -e "${RTV_REQUIRE_SERVICE_RESTART}" | grep -v '^\s*$' | sort | uniq)
+
+	for service in "${servicesToRestart[@]}"; do
 		enable_service "${service}"
 		restart_service "${service}"
 	done
@@ -426,10 +457,10 @@ function main() {
 	lock
 	trap unlock EXIT
 
+	declare_runtime_variables
 	declare_config
 	init_config
 	set_extra_envs
-	declare_runtime_variables
 
 	while true; do
 		reset_config

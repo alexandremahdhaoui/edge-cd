@@ -1,5 +1,8 @@
 # TODOs
 
+- FIX UNIT TESTS
+- Add E2E test target in Makefile
+
 ## Dashboard
 
 #### Open tasks

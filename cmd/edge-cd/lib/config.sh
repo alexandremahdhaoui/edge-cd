@@ -47,7 +47,7 @@ function set_extra_envs() {
 		fi
 
 		declare -gx "$key=$value"
-	done < <(yq -e '.extraEnvs[] | to_entries[] | "\(.key)=\(.value)"' "${CONFIG_PATH}")
+	done < <(yq -e '(.extraEnvs // []) | .[] | to_entries | .[] | .key + "=" + .value' "${CONFIG_PATH}")
 }
 
 function reset_extra_envs() {
@@ -77,10 +77,16 @@ function read_yaml_stdin() {
 	echo -e "${yamlContent}" | yq -e "${yamlPath}"
 }
 
+function read_yaml_stdin_optional() {
+	local yamlPath="${1}"
+	local yamlContent="${2}"
+	echo -e "${yamlContent}" | yq "${yamlPath}"
+}
+
 function read_yaml_file() {
 	local yamlPath="${1}"
 	local yamlFile="${2}"
-	yq -e "${yamlPath}" "${yamlFile}"
+	yq -e -r "${yamlPath}" "${yamlFile}"
 }
 
 function read_config() {
@@ -103,7 +109,7 @@ function read_value() {
 
 	# 1. Check Environment Variable
 	if [[ -n "${env_var_name}" ]]; then
-		if [[ -n "${!env_var_name}" ]] && [[ "${!env_var_name}" != "null" ]]; then
+		if [[ -n "${!env_var_name:-}" ]] && [[ "${!env_var_name:-}" != "null" ]]; then
 			printf '%s' "${!env_var_name}"
 			return
 		fi
@@ -121,8 +127,9 @@ function read_value() {
 	# 3. Use Default Value
 	if [[ -n "${defaultValue}" ]]; then
 		printf '%s' "${defaultValue}"
+		return # Return successfully if default value is used
 	fi
 
-	echo 1>&2 "[ERROR] cannot read value from config; args: env_var_name=${env_var_name}, !env_var_name=${!env_var_name}, yamlPath=${yamlPath}, defaultValue=${defaultValue}"
+	echo 1>&2 "[ERROR] cannot read value from config; args: env_var_name=${env_var_name}, !env_var_name=${!env_var_name:-}, yamlPath=${yamlPath}, defaultValue=${defaultValue}"
 	exit 1
 }

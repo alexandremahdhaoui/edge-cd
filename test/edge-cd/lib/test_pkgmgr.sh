@@ -6,19 +6,18 @@
 set -o errexit
 set -o nounset
 set -o pipefail
+set -o xtrace
 
 # --- Setup ---
 SRC_DIR_OF_THIS_SCRIPT="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 LIB_DIR="${SRC_DIR_OF_THIS_SCRIPT}/../../../cmd/edge-cd/lib"
 
-# Mock dependencies before sourcing the script
-logInfo() { :; }
-logErr() { :; }
-read_config() { :; }
-read_yaml_stdin() { :; }
-yq() { :; }
-
 # Source the script to be tested
+# Dependencies are not mocked to test the actual functionality.
+source "${LIB_DIR}/config.sh"
+source "${LIB_DIR}/log.sh"
+__LOADED_LIB_CONFIG=true
+__LOADED_LIB_LOG=true
 source "${LIB_DIR}/pkgmgr.sh"
 
 # --- Mocks ---
@@ -82,27 +81,32 @@ assert_equals() {
 
 # --- Test Cases ---
 
+mock_update() { echo "update_called"; }
+mock_upgrade() { echo "upgrade_called"; }
+mock_install() { echo "install_called $*" ; }
+export -f mock_update mock_upgrade mock_install
+
 test_reconcile_package_auto_upgrade_false() {
-    yq() { echo "false"; }
-    export -f yq
+    echo "packageManager: { autoUpgrade: false }" > "${CONFIG_PATH}"
+    mkdir -p "${PKGMGR_DIR}"
+    touch "${PKGMGR_DIR}/opkg.yaml"
     # This should do nothing and return 0
     reconcile_package_auto_upgrade
 }
 
 test_reconcile_package_auto_upgrade_true() {
-    yq() { echo "true"; }
-    
-    __get_package_manager_config() { echo "fake_config"; }
-
-    mock_update() { echo "update_called"; }
-    mock_upgrade() { echo "upgrade_called"; }
-    export -f mock_update mock_upgrade
-
-    read_yaml_stdin() {
-        if [[ "$1" == ".update[]" ]]; then echo "mock_update"; fi
-        if [[ "$1" == ".upgrade[]" ]]; then echo "mock_upgrade"; fi
-    }
-    export -f __get_package_manager_config read_yaml_stdin
+    cat > "${CONFIG_PATH}" <<EOF
+packageManager:
+  name: opkg
+  autoUpgrade: true
+EOF
+    mkdir -p "${PKGMGR_DIR}"
+    cat > "${PKGMGR_DIR}/opkg" <<EOF
+update:
+  - mock_update
+upgrade:
+  - mock_upgrade
+EOF
 
     local output
     output="$(reconcile_package_auto_upgrade)"
@@ -110,9 +114,11 @@ test_reconcile_package_auto_upgrade_true() {
 }
 
 test_reconcile_packages_no_packages() {
-    yq() { echo ""; }
+    echo "packageManager: { name: opkg }" > "${CONFIG_PATH}"
+    mkdir -p "${PKGMGR_DIR}"
+    touch "${PKGMGR_DIR}/opkg.yaml"
     logInfo() { echo "$*"; }
-    export -f yq logInfo
+    export -f logInfo
 
     local output
     output="$(reconcile_packages)"
@@ -120,19 +126,20 @@ test_reconcile_packages_no_packages() {
 }
 
 test_reconcile_packages_with_packages() {
-    yq() { echo $'pkg1\npkg2'; }
-
-    __get_package_manager_config() { echo "fake_config"; }
-
-    mock_update() { echo "update_called"; }
-    mock_install() { echo "install_called $*" ; }
-    export -f mock_update mock_install
-
-    read_yaml_stdin() {
-        if [[ "$1" == ".update[]" ]]; then echo "mock_update"; fi
-        if [[ "$1" == ".install[]" ]]; then echo "mock_install"; fi
-    }
-    export -f yq __get_package_manager_config read_yaml_stdin
+    cat > "${CONFIG_PATH}" <<EOF
+packageManager:
+  name: opkg
+  requiredPackages:
+    - pkg1
+    - pkg2
+EOF
+    mkdir -p "${PKGMGR_DIR}"
+    cat > "${PKGMGR_DIR}/opkg" <<EOF
+update:
+  - mock_update
+install:
+  - mock_install
+EOF
 
     local output
     output="$(reconcile_packages)"
