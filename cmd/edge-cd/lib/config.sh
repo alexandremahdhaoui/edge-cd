@@ -33,23 +33,27 @@ function set_extra_envs() {
 	BACKUP_EXTRA_ENVS=()
 
 	local key value
-	while IFS='=' read -r key value; do
-		[[ -z "$key" ]] && continue # skip malformed lines
+	local yq_output
+	yq_output=$(yq '(.extraEnvs // []) | .[] | to_entries | .[] | .key + "=" + .value' "${CONFIG_PATH}")
 
-		BACKUP_EXTRA_ENVS+=("$key")
-		local backup_key="__BACKUP_${key}"
-		if [[ -v "$key" ]]; then
-			# Backup the current value.
-			declare -g "$backup_key=${!key}"
-		else
-			# Use a special marker to indicate the variable was originally unset.
-			declare -g "$backup_key=__WAS_UNSET__"
-		fi
+	if [[ -n "${yq_output}" ]]; then # Only process if yq returned something
+		while IFS='=' read -r key value; do
+			[[ -z "$key" ]] && continue # skip malformed lines
 
-		declare -gx "$key=$value"
-	done < <(yq -e '(.extraEnvs // []) | .[] | to_entries | .[] | .key + "=" + .value' "${CONFIG_PATH}")
+			BACKUP_EXTRA_ENVS+=("$key")
+			local backup_key="__BACKUP_${key}"
+			if [[ -v "$key" ]]; then
+				# Backup the current value.
+				declare -g "$backup_key=${!key}"
+			else
+				# Use a special marker to indicate the variable was originally unset.
+				declare -g "$backup_key=__WAS_UNSET__"
+			fi
+
+			declare -gx "$key=$value"
+		done <<< "${yq_output}"
+	fi
 }
-
 function reset_extra_envs() {
 	for var_name in "${BACKUP_EXTRA_ENVS[@]}"; do
 		local backup_name="__BACKUP_${var_name}"
@@ -80,18 +84,35 @@ function read_yaml_stdin() {
 function read_yaml_stdin_optional() {
 	local yamlPath="${1}"
 	local yamlContent="${2}"
-	echo -e "${yamlContent}" | yq "${yamlPath}"
+	local result
+	result=$(echo "${yamlContent}" | yq "${yamlPath}")
+	if [[ "${result}" == "null" ]]; then
+		echo ""
+	else
+		echo "${result}"
+	fi
 }
 
 function read_yaml_file() {
 	local yamlPath="${1}"
 	local yamlFile="${2}"
-	yq -e -r "${yamlPath}" "${yamlFile}"
+	yq -e "${yamlPath}" "${yamlFile}"
+}
+
+function read_yaml_file_optional() {
+	local yamlPath="${1}"
+	local yamlFile="${2}"
+	yq "${yamlPath}" "${yamlFile}"
 }
 
 function read_config() {
 	local yamlPath="${1}"
 	read_yaml_file "${yamlPath}" "${CONFIG_PATH}"
+}
+
+function read_config_optional() {
+	local yamlPath="${1}"
+	read_yaml_file_optional "${yamlPath}" "${CONFIG_PATH}"
 }
 
 # -- reads config in the following order of precedence:
@@ -117,8 +138,7 @@ function read_value() {
 
 	# 2. Check Configuration File
 	local valueFromConfig
-	valueFromConfig="$(read_config "${yamlPath}" 2>/dev/null || true)"
-
+	valueFromConfig="$(read_config_optional "${yamlPath}" 2>/dev/null)"
 	if [[ -n "${valueFromConfig}" && "${valueFromConfig}" != "null" ]]; then
 		printf '%s' "${valueFromConfig}"
 		return
@@ -127,7 +147,7 @@ function read_value() {
 	# 3. Use Default Value
 	if [[ -n "${defaultValue}" ]]; then
 		printf '%s' "${defaultValue}"
-		return # Return successfully if default value is used
+		return
 	fi
 
 	echo 1>&2 "[ERROR] cannot read value from config; args: env_var_name=${env_var_name}, !env_var_name=${!env_var_name:-}, yamlPath=${yamlPath}, defaultValue=${defaultValue}"

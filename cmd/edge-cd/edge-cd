@@ -279,13 +279,17 @@ function __reconcile_file_mux() {
 
 	# TODO: Add a "git" type? E.g.: clone any repo and copy file from repo to the dest
 	case "${type}" in
-		file) ;;
+		file)
+			srcPath="${CONFIG_REPO_DESTINATION_PATH}/${srcPath}"
+			;;
 
 		# -- directory does not support recursive
 		directory)
 			find "${srcPath}" -type f ! -name '\.*' | while IFS= read -r srcPath; do
 				__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
 			done
+			# -- directory returns early
+			return
 			;;
 
 		content)
@@ -301,9 +305,6 @@ function __reconcile_file_mux() {
 	esac
 
 	# -- sync file
-	if [[ "${type}" == "file" || "${type}" == "directory" ]]; then
-		srcPath="${CONFIG_REPO_DESTINATION_PATH}/${srcPath}"
-	fi
 	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
 }
 

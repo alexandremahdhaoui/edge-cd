@@ -3,7 +3,7 @@
 test-unit:
 	@echo "Running unit tests..."
 	@export SRC_DIR=$(CURDIR)/cmd/edge-cd; \
-	for f in test/edge-cd/lib/test_*.sh; do \
+	for f in test/edge-cd/lib/*_test.sh; do \
 		echo "Running $$f"; \
 		bash $$f; \
 	done

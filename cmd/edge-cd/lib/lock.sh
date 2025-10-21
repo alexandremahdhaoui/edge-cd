@@ -26,11 +26,12 @@ SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
 # Lock
 # ------------------------------------------------------------------#
 
-__DEFAULT_LOCK_FILE_DIRNAME="/tmp/edge-cd"
+declare -g __DEFAULT_LOCK_FILE_DIRNAME="/tmp/edge-cd"
 LOCK_FILE_DIRNAME="${LOCK_FILE_DIRNAME:-${__DEFAULT_LOCK_FILE_DIRNAME}}"
 
 function __get_lock_file_path() {
-	echo "${LOCK_FILE_DIRNAME}/edge-cd.lock"
+	local LOCK_FILE_DIRNAME_LOCAL="${LOCK_FILE_DIRNAME:-/tmp/edge-cd}"
+	echo "${LOCK_FILE_DIRNAME_LOCAL}/edge-cd.lock"
 }
 
 function lock() {

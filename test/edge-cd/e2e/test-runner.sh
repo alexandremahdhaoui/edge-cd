@@ -5,19 +5,27 @@ set -o nounset
 set -o pipefail
 set -o xtrace
 
-main() {
+__on_failure() {
+  echo >&2 "[ERROR] Test failed"
+}
 
+__on_success() {
+  rm /tmp/edge-cd.log
+}
+
+main() {
   # -- Run edge-cd in the background and redirect stderr to a log file
   touch /tmp/edge-cd.log
-  CONFIG_PATH=/opt/config/config.yaml /opt/src/edge-cd/cmd/edge-cd/edge-cd 2> /tmp/edge-cd.log &
-
+  trap __on_failure EXIT
+  CONFIG_PATH=/opt/config/config.yaml /opt/src/edge-cd/cmd/edge-cd/edge-cd 2>&1 | tee /tmp/edge-cd.log &
   # -- Wait for edge-cd to complete its first reconciliation loop
-  timeout 60 bash -c 'until grep -q "Sleeping for" /tmp/edge-cd.log; do sleep 1; done'
+  if ! timeout 60 bash -c "until ! pgrep -f '^bash /opt/src/edge-cd/cmd/edge-cd/edge-cd$' &>/dev/null || grep -q 'Sleeping for' /tmp/edge-cd.log; do sleep 1; done"; then
+    echo "[ERROR] Timeout waiting for 'Sleeping for' in edge-cd.log."
+    exit 1
+  fi
 
-  # Check if the timeout occurred
-  if [ $? -ne 0 ]; then
-    echo "Error: Timeout waiting for 'Sleeping for' in edge-cd.log. Log content:"
-    cat /tmp/edge-cd.log
+  if ! pgrep -f '^bash /opt/src/edge-cd/cmd/edge-cd/edge-cd$' &>/dev/null; then
+    echo "[ERROR] edge-cd is not running"
     exit 1
   fi
 
@@ -37,7 +45,8 @@ main() {
   # -- Verify service is started (check for running file)
   [ -f /tmp/hello-world-running ]
 
-  echo "All tests passed!"
+  echo "[SUCCESS] All tests passed!"
+  trap __on_success EXIT
 }
 
 main "$@"

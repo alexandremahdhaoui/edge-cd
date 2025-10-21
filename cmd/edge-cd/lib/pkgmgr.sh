@@ -55,7 +55,7 @@ function __get_package_manager_config() {
 
 function reconcile_package_auto_upgrade() {
 	local autoUpgrade
-	autoUpgrade="$(yq -e '.packageManager.autoUpgrade' "${CONFIG_PATH}" || echo "false")"
+	autoUpgrade="$(yq -e '.packageManager.autoUpgrade' "${CONFIG_PATH}" 2>/dev/null || echo "false")"
 	if [[ "${autoUpgrade}" != "true" ]]; then
 		return 0
 	fi
@@ -67,9 +67,10 @@ function reconcile_package_auto_upgrade() {
 
 	local -a update
 	local -a upgrade
-	readarray -t update < <(read_yaml_stdin '.update[]' "${config}")
-	readarray -t upgrade < <(read_yaml_stdin '.upgrade[]' "${config}")
-
+	local rawUpdateOutput
+	rawUpdateOutput=$(read_yaml_stdin '.update[]' "${config}")
+	logInfo "DEBUG: rawUpdateOutput: ${rawUpdateOutput}"
+	readarray -t update <<<"${rawUpdateOutput}"
 	"${update[@]}"
 
 	local packages
@@ -82,7 +83,7 @@ function reconcile_package_auto_upgrade() {
 
 function reconcile_packages() {
 	local packages
-	packages="$(yq -e '.packageManager.requiredPackages[]' "${CONFIG_PATH}" || echo "")"
+	packages="$(yq -e '.packageManager.requiredPackages[]' "${CONFIG_PATH}" 2>/dev/null || echo "")"
 	[ "${packages}" == "" ] \
 		&& logInfo "No package to install" \
 		&& return
@@ -98,7 +99,7 @@ function reconcile_packages() {
 	local -a install
 	local -a update
 	readarray -t install < <(read_yaml_stdin '.install[]' "${config}")
-	readarray -t update < <(read_yaml_stdin '.update[]' "${config}")
+	readarray -t update < <(echo "${config}" | yq -e -r '.update[]')
 
 	"${update[@]}"
 	"${install[@]}" "${packageArray[@]}"
