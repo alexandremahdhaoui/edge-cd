@@ -1,0 +1,12 @@
+[Unit]
+Description=EdgeCD Service
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/edge-cd # Assuming edge-cd binary is here
+Restart=always
+User=root # Or a less privileged user if applicable
+Group=root # Or a less privileged group if applicable
+
+[Install]
+WantedBy=multi-user.target

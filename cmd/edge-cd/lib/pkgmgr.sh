@@ -67,10 +67,8 @@ function reconcile_package_auto_upgrade() {
 
 	local -a update
 	local -a upgrade
-	local rawUpdateOutput
-	rawUpdateOutput=$(read_yaml_stdin '.update[]' "${config}")
-	logInfo "DEBUG: rawUpdateOutput: ${rawUpdateOutput}"
-	readarray -t update <<<"${rawUpdateOutput}"
+	readarray -t update < <(echo "${config}" | yq -e -r '.update[]')
+	readarray -t upgrade < <(echo "${config}" | yq -e -r '.upgrade[]')
 	"${update[@]}"
 
 	local packages
@@ -98,7 +96,7 @@ function reconcile_packages() {
 
 	local -a install
 	local -a update
-	readarray -t install < <(read_yaml_stdin '.install[]' "${config}")
+	readarray -t install < <(echo "${config}" | yq -e -r '.install[]')
 	readarray -t update < <(echo "${config}" | yq -e -r '.update[]')
 
 	"${update[@]}"

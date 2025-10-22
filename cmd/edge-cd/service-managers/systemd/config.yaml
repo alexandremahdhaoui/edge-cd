@@ -1,0 +1,9 @@
+commands:
+  enable: ["systemctl", "enable", "__SERVICE_NAME__"]
+  restart: ["systemctl", "restart", "__SERVICE_NAME__"]
+
+# -- please note that the source path of the service must be:
+# "cmd/edge-cd/service-managers/SERVICE_MANAGER_NAME/service"
+edgeCDService:
+  # -- destination path of the service file
+  destinationPath: '/etc/systemd/system/edge-cd.service'
