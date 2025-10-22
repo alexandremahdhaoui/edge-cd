@@ -132,7 +132,7 @@ func TestE2EProvisionPackages(t *testing.T) {
 	})
 
 	// Create SSH client
-	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, sshPort)
+	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, "", sshPort)
 	if err != nil {
 		t.Fatalf("Failed to create SSH client: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestE2ECloneEdgeCDRepo(t *testing.T) {
 	})
 
 	// Create SSH client
-	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, sshPort)
+	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, "", sshPort)
 	if err != nil {
 		t.Fatalf("Failed to create SSH client: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestE2ECloneUserConfigRepo(t *testing.T) {
 	})
 
 	// Create SSH client
-	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, sshPort)
+	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, "", sshPort)
 	if err != nil {
 		t.Fatalf("Failed to create SSH client: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestE2ESetupEdgeCDService(t *testing.T) {
 	})
 
 	// Create SSH client
-	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, sshPort)
+	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, "", sshPort)
 	if err != nil {
 		t.Fatalf("Failed to create SSH client: %v", err)
 	}

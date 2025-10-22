@@ -1,7 +1,9 @@
 package e2e
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -55,8 +57,18 @@ func CreateVM(cfg VMConfig) (*libvirt.Connect, *libvirt.Domain, error) {
 	}
 	defer os.Remove(cloudInitISOPath)
 
+	// -- Create overlay vm image
 	vmDiskPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s.qcow2", cfg.Name))
-	qemuImgCmd := exec.Command("qemu-img", "create", "-f", "qcow2", "-b", cfg.ImageQCOW2Path, vmDiskPath, cfg.DiskSize)
+	qemuImgCmd := exec.Command(
+		"qemu-img",
+		"create",
+		"-f",
+		"qcow2",
+		"-o",
+		fmt.Sprintf("backing_file=%s,backing_fmt=qcow2", cfg.ImageQCOW2Path),
+		vmDiskPath,
+		cfg.DiskSize,
+	)
 	if output, err := qemuImgCmd.CombinedOutput(); err != nil {
 		conn.Close()
 		return nil, nil, fmt.Errorf("failed to create VM disk: %w\nOutput: %s", err, output)
@@ -154,57 +166,122 @@ func DestroyVM(conn *libvirt.Connect, dom *libvirt.Domain) error {
 func generateCloudInitISO(vmName, userData string) (string, error) {
 	metaData := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", vmName, vmName)
 
-	userFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
-	if err := ioutil.WriteFile(userFile, []byte(userData), 0644); err != nil {
+	isoPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-cloud-init.iso", vmName))
+
+	// Create a temporary directory for cloud-init config files
+	cloudInitDir := filepath.Join(os.TempDir(), fmt.Sprintf("%s-cloud-init-config", vmName))
+	if err := os.MkdirAll(cloudInitDir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create cloud-init config directory: %w", err)
+	}
+	defer os.RemoveAll(cloudInitDir)
+
+	userFile := filepath.Join(cloudInitDir, "user-data")
+	if err := ioutil.WriteFile(userFile, []byte(userData), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write user-data file: %w", err)
 	}
-	defer os.Remove(userFile)
 
-	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
-	if err := ioutil.WriteFile(metaFile, []byte(metaData), 0644); err != nil {
+	metaFile := filepath.Join(cloudInitDir, "meta-data")
+	if err := ioutil.WriteFile(metaFile, []byte(metaData), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write meta-data file: %w", err)
 	}
-	defer os.Remove(metaFile)
 
-	isoPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-cloud-init.iso", vmName))
-	genisoimageCmd := exec.Command("genisoimage", "-output", isoPath, "-volid", "cidata", "-joliet", "-rock", userFile, metaFile)
-	if output, err := genisoimageCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("failed to create cloud-init ISO: %w\nOutput: %s", err, output)
+	xorrisoCmd := exec.Command(
+		"xorriso",
+		"-as", "mkisofs",
+		"-o", isoPath,
+		"-V", "cidata",
+		"-J", "-R",
+		cloudInitDir,
+	)
+	if output, err := xorrisoCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to create cloud-init ISO with xorriso: %w\nOutput: %s", err, output)
 	}
-
 	return isoPath, nil
 }
 
 func GetVMIPAddress(conn *libvirt.Connect, dom *libvirt.Domain) (string, error) {
-	time.Sleep(30 * time.Second)
+	// Retry for up to 30 seconds to get the VM's IP address
+	timeout := time.After(30 * time.Second)
+	tick := time.NewTicker(3 * time.Second)
+	defer tick.Stop()
 
-	net, err := conn.LookupNetworkByUUIDString("default") // Assuming 'default' network
-	if err != nil {
-		return "", fmt.Errorf("failed to lookup default network: %w", err)
+	for {
+		select {
+		case <-timeout:
+			return "", fmt.Errorf("timed out waiting for VM IP address")
+		case <-tick.C:
+			ifaces, err := dom.ListAllInterfaceAddresses(
+				libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE,
+			)
+			if err != nil {
+				fmt.Printf("Error listing interface addresses: %v\n", err)
+				continue
+			}
+
+			for _, iface := range ifaces {
+				for _, addr := range iface.Addrs {
+					if addr.Type == libvirt.IP_ADDR_TYPE_IPV4 {
+						return strings.Split(addr.Addr, "/")[0], nil
+					}
+				}
+			}
+			fmt.Printf("VM IP address not found in libvirt interface addresses, retrying...\n")
+		}
 	}
-	defer net.Free()
+}
 
-	domName, err := dom.GetName()
+func getConsoleOutput(conn *libvirt.Connect, dom *libvirt.Domain) (string, error) {
+	domainName, err := dom.GetName()
 	if err != nil {
 		return "", fmt.Errorf("failed to get domain name: %w", err)
 	}
 
-	virshCmd := exec.Command("virsh", "net-dhcp-leases", "default")
-	output, err := virshCmd.CombinedOutput()
+	stream, err := conn.NewStream(0)
 	if err != nil {
-		return "", fmt.Errorf("failed to get DHCP leases: %w\nOutput: %s", err, output)
+		return "", fmt.Errorf("failed to create new stream: %w", err)
+	}
+	defer stream.Free()
+
+	// Open the console, passing the Stream object. Empty string for default console.
+	// Flags can be 0 for default behavior.
+	err = dom.OpenConsole("", stream, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to open console for domain %s: %w", domainName, err)
 	}
 
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, domName) && strings.Contains(line, "ipv4") {
-			fields := strings.Fields(line)
-			if len(fields) > 4 {
-				ipField := fields[3] // e.g., 192.168.122.10/24
-				return strings.Split(ipField, "/")[0], nil
+	var consoleOutput bytes.Buffer
+	buffer := make([]byte, 4096)
+
+	// Use a timeout for reading console output to prevent blocking indefinitely
+	readTimeout := time.After(10 * time.Second) // Read for 10 seconds
+	readDone := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-readTimeout:
+				close(readDone)
+				return
+			default:
+				n, err := stream.Recv(buffer)
+				if err != nil {
+					// Handle specific errors like EOF or stream closure
+					if err == io.EOF {
+						close(readDone)
+						return
+					}
+					fmt.Printf("Error reading from console stream: %v\n", err)
+					close(readDone)
+					return
+				}
+				if n > 0 {
+					consoleOutput.Write(buffer[:n])
+				}
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
-	}
+	}()
 
-	return "", fmt.Errorf("VM IP address not found")
+	<-readDone
+	return consoleOutput.String(), nil
 }

@@ -29,17 +29,47 @@ func TestVMLifecycle(t *testing.T) {
 	conn.Close()
 
 	// --- Configuration ---
+
+	// Create a temporary directory for test artifacts
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(os.TempDir(), "edgectl")
+	fmt.Println(cacheDir)
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatalf("failed to create cache directory for vm image %q", cacheDir)
+	}
+
 	vmName := fmt.Sprintf("test-vm-%d", time.Now().UnixNano())
-	imageURL := "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.qcow2"
-	imagePath := filepath.Join(os.TempDir(), "ubuntu-24.04-server-cloudimg-amd64.qcow2")
-	sshKeyPath := "~/.ssh/id_rsa" // Assuming default SSH key for now
+	imageName := "ubuntu-24.04-server-cloudimg-amd64.img"
+	imageURL := "https://cloud-images.ubuntu.com/releases/noble/release/" + imageName
+	imageCachePath := filepath.Join(cacheDir, imageName)
+
+	// Generate SSH key pair in the temporary directory
+	sshKeyPath := filepath.Join(tempDir, "id_rsa")
+	cmd := exec.Command("ssh-keygen", "-t", "rsa", "-b", "2048", "-f", sshKeyPath, "-N", "")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Failed to generate SSH key pair: %v\nOutput: %s", err, output)
+	}
+
+	// Set restrictive permissions on the private key file
+	if err := os.Chmod(sshKeyPath, 0o600); err != nil {
+		t.Fatalf("Failed to set permissions on SSH private key: %v", err)
+	}
 
 	// Download image if not exists
-	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		t.Logf("Downloading VM image from %s to %s...", imageURL, imagePath)
-		cmd := exec.Command("wget", "-O", imagePath, imageURL)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("Failed to download VM image: %v\nOutput: %s", err, output)
+	if _, err := os.Stat(imageCachePath); os.IsNotExist(err) {
+		t.Logf("Downloading VM image from %s to %s...", imageURL, imageCachePath)
+		cmd := exec.Command(
+			"wget",
+			"--progress=dot",
+			"-e", "dotbytes=3M",
+			"-O", imageCachePath,
+			imageURL,
+		)
+
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("Failed to download VM image: %v", err)
 		}
 	}
 
@@ -48,6 +78,7 @@ func TestVMLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get SSH public key: %v", err)
 	}
+	t.Logf("SSH Public Key: %s", sshPublicKey)
 
 	userData := fmt.Sprintf(`
 #cloud-config
@@ -57,12 +88,13 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     ssh_authorized_keys:
-      - %s
+      - %q
 `, vmName, sshPublicKey)
 
-	cfg := NewVMConfig(vmName, imagePath, sshKeyPath)
+	cfg := NewVMConfig(vmName, imageCachePath, sshKeyPath)
 	cfg.UserData = userData
 
+	t.Logf("[INFO] Creating VM with config %+v", cfg)
 	// --- Test VM Lifecycle ---
 	conn, dom, err := CreateVM(cfg)
 	if err != nil {
@@ -74,37 +106,65 @@ users:
 		}
 	}()
 
-	// Wait for VM to boot and get IP
+	t.Log("[INFO] Retrieving VM IP Adrr...")
 	var ipAddress string
-	for i := 0; i < 10; i++ { // Retry a few times
-		ipAddress, err = GetVMIPAddress(conn, dom)
-		if err == nil && ipAddress != "" {
-			break
-		}
-		t.Logf("Waiting for VM IP address... attempt %d", i+1)
-		time.Sleep(10 * time.Second)
-	}
+	ipAddress, err = GetVMIPAddress(conn, dom)
 
 	if err != nil || ipAddress == "" {
 		t.Fatalf("Failed to get VM IP address: %v", err)
 	}
 	t.Logf("VM %s has IP: %s", vmName, ipAddress)
 
-	// Basic SSH connectivity test
-	sshClient, err := ssh.NewClient(ipAddress, "ubuntu", cfg.SSHKeyPath, "22")
+	// Get and log serial console output
+	consoleOutput, err := getConsoleOutput(conn, dom)
 	if err != nil {
-		t.Fatalf("Failed to create SSH client to VM: %v", err)
+		t.Logf("Failed to get console output: %v", err)
+	} else {
+		t.Logf("\n--- VM Console Output ---\n%s\n-------------------------", consoleOutput)
 	}
 
-	stdout, stderr, err := sshClient.Run("echo hello")
-	if err != nil {
-		t.Fatalf("Failed to run command on VM via SSH: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
-	}
-	if strings.TrimSpace(stdout) != "hello" {
-		t.Fatalf("Unexpected SSH command output: got %q, want %q", strings.TrimSpace(stdout), "hello")
-	}
+	// Retry SSH connection and command execution
+	var sshClient *ssh.Client
+	var stdout, stderr string
+	var sshErr error
 
-	t.Log("VM lifecycle and basic SSH connectivity test passed.")
+	sshTimeout := time.After(30 * time.Second)
+	sshTick := time.NewTicker(3 * time.Second)
+	defer sshTick.Stop()
+
+	for {
+		select {
+		case <-sshTimeout:
+			t.Fatalf(
+				"Timed out waiting for SSH connection to VM %s at %s: %v",
+				vmName,
+				ipAddress,
+				sshErr,
+			)
+
+		case <-sshTick.C:
+			sshClient, sshErr = ssh.NewClient(ipAddress, "ubuntu", cfg.SSHKeyPath, "1234", "22")
+			if sshErr != nil {
+				t.Logf("SSH connection failed: %v, retrying...", sshErr)
+				continue
+			}
+
+			stdout, stderr, sshErr = sshClient.Run("echo hello")
+			if sshErr == nil {
+				if strings.TrimSpace(stdout) == "hello" {
+					t.Log("VM lifecycle and basic SSH connectivity test passed.")
+					return // Test passed
+				}
+				t.Logf(
+					"Unexpected SSH command output: got %q, want %q, retrying...",
+					strings.TrimSpace(stdout),
+					"hello",
+				)
+			} else {
+				t.Logf("Failed to run command on VM via SSH: %v\nStdout: %s\nStderr: %s, retrying...", sshErr, stdout, stderr)
+			}
+		}
+	}
 }
 
 // getSSHPublicKey reads the public key from the given private key path.

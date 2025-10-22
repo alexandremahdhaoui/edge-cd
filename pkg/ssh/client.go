@@ -15,23 +15,25 @@ type Client struct {
 	Host       string
 	User       string
 	PrivateKey []byte
+	Password   string
 	Port       string
 }
 
 // NewClient creates a new SSH client.
-func NewClient(host, user, privateKeyPath, port string) (*Client, error) {
+func NewClient(host, user, privateKeyPath, password, port string) (*Client, error) {
 	key, err := ioutil.ReadFile(privateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read private key: %w", err)
 	}
 
 	return &Client{
-		Host:       host,
-		User:       user,
-		PrivateKey: key,
-		Port:       port,
-	},
-	nil
+			Host:       host,
+			User:       user,
+			PrivateKey: key,
+			Password:   password,
+			Port:       port,
+		},
+		nil
 }
 
 // Run executes a command on the remote host via SSH.
@@ -45,6 +47,7 @@ func (c *Client) Run(cmd string) (stdout, stderr string, err error) {
 		User: c.User,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
+			ssh.Password(c.Password),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For testing, ignore host key verification
 		Timeout:         10 * time.Second,

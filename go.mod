@@ -7,4 +7,7 @@ require (
 	libvirt.org/go/libvirt v1.11006.0
 )
 
-require golang.org/x/sys v0.37.0 // indirect
+require (
+	golang.org/x/sys v0.37.0 // indirect
+	libvirt.org/go/libvirtxml v1.11008.0 // indirect
+)
