@@ -63,7 +63,7 @@ __DEFAULT_CONFIG_REPO_URL=https://github.com/alexandremahdhaoui/edge-cd-config.g
 
 function declare_config() {
 	# -- declare vars
-	declare CONFIG_FILENAME
+	declare CONFIG_SPEC
 	declare CONFIG_PATH
 	declare CONFIG_REPO_BRANCH
 	declare CONFIG_REPO_DESTINATION_PATH
@@ -77,7 +77,7 @@ function declare_config() {
 	declare CONFIG_COMMIT_PATH
 
 	# -- declare backup vars
-	declare __BACKUP_CONFIG_FILENAME
+	declare __BACKUP_CONFIG_SPEC
 	declare __BACKUP_CONFIG_PATH
 	declare __BACKUP_CONFIG_REPO_DESTINATION_PATH
 	declare __BACKUP_CONFIG_REPO_URL
@@ -94,7 +94,7 @@ function init_config() {
 	set_extra_envs
 
 	# -- user config
-	__BACKUP_CONFIG_FILENAME="$(read_value CONFIG_FILENAME '.config.filename')"
+	__BACKUP_CONFIG_SPEC="$(read_value CONFIG_SPEC '.config.spec')"
 	__BACKUP_CONFIG_PATH="$(read_value CONFIG_PATH '.config.path')"
 	__BACKUP_CONFIG_REPO_BRANCH="$(read_value CONFIG_REPO_BRANCH '.config.repo.branch' "${__DEFAULT_CONFIG_REPO_BRANCH}")"
 	__BACKUP_CONFIG_REPO_DESTINATION_PATH="$(read_value CONFIG_REPO_DESTINATION_PATH '.config.repo.destPath' "${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}")"
@@ -114,7 +114,7 @@ function init_config() {
 function reset_config() {
 	reset_extra_envs
 
-	CONFIG_FILENAME="${__BACKUP_CONFIG_FILENAME}"
+	CONFIG_SPEC="${__BACKUP_CONFIG_SPEC}"
 	CONFIG_PATH="${__BACKUP_CONFIG_PATH}"
 
 	CONFIG_REPO_BRANCH="${__BACKUP_CONFIG_REPO_BRANCH}"

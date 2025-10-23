@@ -1,16 +1,15 @@
-commands:
-  # -- command to update package manager repos
-  update: []
-  # - opkg
-  # - update
+# -- command to update package manager repos
+update: []
+# - opkg
+# - update
 
-  # -- command to install packages
-  install: []
-  # - opkg
-  # - install
+# -- command to install packages
+install: []
+# - opkg
+# - install
 
-  # -- command to upgrade packages
-  upgrade: []
-  # - opkg
-  # - upgrade
+# -- command to upgrade packages
+upgrade: []
+# - opkg
+# - upgrade
 

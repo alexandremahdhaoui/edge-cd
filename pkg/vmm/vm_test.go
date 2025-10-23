@@ -2,7 +2,6 @@ package vmm_test
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,7 +175,7 @@ func getSSHPublicKey(privateKeyPath string) (string, error) {
 		return "", fmt.Errorf("SSH public key not found at %s", publicKeyPath)
 	}
 
-	publicKeyBytes, err := ioutil.ReadFile(publicKeyPath)
+	publicKeyBytes, err := os.ReadFile(publicKeyPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read SSH public key: %w", err)
 	}

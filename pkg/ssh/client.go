@@ -3,8 +3,8 @@ package ssh
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -20,7 +20,7 @@ type Client struct {
 
 // NewClient creates a new SSH client.
 func NewClient(host, user, privateKeyPath, port string) (*Client, error) {
-	key, err := ioutil.ReadFile(privateKeyPath)
+	key, err := os.ReadFile(privateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read private key: %w", err)
 	}

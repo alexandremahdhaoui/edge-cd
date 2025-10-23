@@ -12,7 +12,7 @@ edgeCD:
 
 config:
   path: ./devices/${HOSTNAME}
-  filename: config.yaml
+  spec: spec.yaml
   repo:
     url: git@github.com:alexandremahdhaoui/deployment.git
     branch: main

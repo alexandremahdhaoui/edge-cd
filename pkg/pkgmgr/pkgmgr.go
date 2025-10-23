@@ -28,7 +28,13 @@ func InstallPackages(runner ssh.Runner, packages []string) error {
 		installCmd := fmt.Sprintf("opkg install %s", pkg)
 		stdout, stderr, err := runner.Run(installCmd)
 		if err != nil {
-			return fmt.Errorf("failed to install package %s: %w\nStdout: %s\nStderr: %s", pkg, err, stdout, stderr)
+			return fmt.Errorf(
+				"failed to install package %s: %w\nStdout: %s\nStderr: %s",
+				pkg,
+				err,
+				stdout,
+				stderr,
+			)
 		}
 	}
 	return nil

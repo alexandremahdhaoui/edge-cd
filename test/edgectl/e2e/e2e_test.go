@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,16 +79,17 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	}
 	t.Logf("SSH Public Key: %s", sshPublicKey)
 
+	targetUser := "ubuntu"
 	userData := fmt.Sprintf(`
 #cloud-config
 hostname: %s
 users:
-  - name: ubuntu
+  - name: %s
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     ssh_authorized_keys:
       - %q
-`, vmName, sshPublicKey)
+`, vmName, targetUser, sshPublicKey)
 
 	cfg := vmm.NewVMConfig(vmName, imageCachePath, sshKeyPath)
 	cfg.UserData = userData
@@ -126,43 +126,28 @@ users:
 
 	// Build the edgectl binary
 	binaryPath := buildEdgectlHelper(t)
+	edgCDRepo := "https://github.com/alexandremahdhaoui/edge-cd.git"
+	configPath := "./test/edgectl/e2e/config"
+	configSpec := "config.yaml"
 
-	// Copy the edgectl binary to the container
-	scmd := exec.Command(
-		"scp",
-		"-i",
-		sshKeyPath,
-		"-o",
-		"StrictHostKeyChecking=no",
-		"-o",
-		"UserKnownHostsFile=/dev/null",
-		"-P",
-		"22",
+	cmd = exec.Command(
 		binaryPath,
-		fmt.Sprintf("ubuntu@%s:/home/ubuntu/edgectl", ipAddress),
+		"bootstrap",
+		"--target", ipAddress,
+		"--user", targetUser,
+		"--config-repo", edgCDRepo,
+		"--config-path", configPath,
+		"--config-spec", configSpec,
+		"--edge-cd-repo", edgCDRepo,
+		"--packages", "git,curl",
+		"--service-manager", "systemd",
+		"--package-manager", "apt",
 	)
-	if output, err := scmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to copy edgectl binary to vm: %v\nOutput: %s", err, output)
-	}
 
-	// TODO:This is wrong!!! edgectl must be run from the local machine and target the target virtual machine. Wtf is this
-	sshCmd := exec.Command(
-		"ssh",
-		"-i",
-		sshKeyPath,
-		"-o",
-		"StrictHostKeyChecking=no",
-		"-o",
-		"UserKnownHostsFile=/dev/null",
-		"-p",
-		"22",
-		fmt.Sprintf("ubuntu@%s", ipAddress),
-		"/home/ubuntu/edgectl bootstrap --target "+ipAddress+" --user ubuntu --key "+sshKeyPath+" --config-repo https://github.com/alexandremahdhaoui/edge-cd-config.git --edge-cd-repo https://github.com/alexandremahdhaoui/edge-cd.git --packages git,curl --service-manager systemd",
-	)
-	output, err := sshCmd.CombinedOutput()
-	// Assert the command exits with code 0 (no error)
-	if err != nil {
-		t.Fatalf("edgectl bootstrap command failed: %v\nOutput: %s", err, output)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to run `edgectl bootstrap`: %v", err)
 	}
 
 	// Check packages
@@ -214,7 +199,7 @@ func getSSHPublicKey(privateKeyPath string) (string, error) {
 		return "", fmt.Errorf("SSH public key not found at %s", publicKeyPath)
 	}
 
-	publicKeyBytes, err := ioutil.ReadFile(publicKeyPath)
+	publicKeyBytes, err := os.ReadFile(publicKeyPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read SSH public key: %w", err)
 	}

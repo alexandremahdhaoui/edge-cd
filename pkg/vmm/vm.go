@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,12 +175,12 @@ func generateCloudInitISO(vmName, userData string) (string, error) {
 	defer os.RemoveAll(cloudInitDir)
 
 	userFile := filepath.Join(cloudInitDir, "user-data")
-	if err := ioutil.WriteFile(userFile, []byte(userData), 0o644); err != nil {
+	if err := os.WriteFile(userFile, []byte(userData), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write user-data file: %w", err)
 	}
 
 	metaFile := filepath.Join(cloudInitDir, "meta-data")
-	if err := ioutil.WriteFile(metaFile, []byte(metaData), 0o644); err != nil {
+	if err := os.WriteFile(metaFile, []byte(metaData), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write meta-data file: %w", err)
 	}
 

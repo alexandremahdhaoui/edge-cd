@@ -3,6 +3,8 @@ package provision
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
+	"path/filepath"
 	"text/template"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
@@ -19,8 +21,8 @@ edgectl:
     destinationPath: "/usr/local/src/edge-cd" # Assuming default path for now
 
 config:
+  spec: "spec.yaml"
   path: "./devices/${HOSTNAME}"
-  filename: "config.yaml"
   repo:
     url: "{{ .ConfigRepoURL }}"
     branch: "main" # Assuming default branch for now
@@ -81,7 +83,25 @@ func PlaceConfigYAML(runner ssh.Runner, content, destPath string) error {
 	cmd := fmt.Sprintf("printf %%s '%s' > %s", content, destPath)
 	stdout, stderr, err := runner.Run(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to place config.yaml at %s: %w. Stdout: %s, Stderr: %s", destPath, err, stdout, stderr)
+		return fmt.Errorf(
+			"failed to place config.yaml at %s: %w. Stdout: %s, Stderr: %s",
+			destPath,
+			err,
+			stdout,
+			stderr,
+		)
 	}
 	return nil
 }
+
+// ReadLocalConfig reads a configuration file from the local filesystem.
+func ReadLocalConfig(configPath, configSpec string) (string, error) {
+	fullPath := filepath.Join(configPath, configSpec)
+	content, err := ioutil.ReadFile(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read local config file %s: %w", fullPath, err)
+	}
+	return string(content), nil
+}
+
+

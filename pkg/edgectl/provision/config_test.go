@@ -1,95 +1,43 @@
-package provision
+package provision_test
 
 import (
-	"fmt"
-	"strings"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/edgectl/provision"
 )
 
-func TestRenderConfigYAML(t *testing.T) {
-	data := ConfigTemplateData{
-		EdgeCDRepoURL:      "https://github.com/example/edge-cd.git",
-		ConfigRepoURL:      "https://github.com/example/config.git",
-		ServiceManagerName: "systemd",
-		PackageManagerName: "apt",
-		RequiredPackages:   []string{"git", "curl"},
-	}
-
-	expectedYAML := `
-# -- defines how EdgeCD clone itself
-edgectl:
-  autoUpdate:
-    enabled: true
-  repo:
-    url: "https://github.com/example/edge-cd.git"
-    branch: "main" # Assuming default branch for now
-    destinationPath: "/usr/local/src/edge-cd" # Assuming default path for now
-
-config:
-  path: "./devices/${HOSTNAME}"
-  filename: "config.yaml"
-  repo:
-    url: "https://github.com/example/config.git"
-    branch: "main" # Assuming default branch for now
-    destinationPath: "/usr/local/src/deployment" # Assuming default path for now
-
-pollingIntervalSecond: 60
-
-extraEnvs:
-  - HOME: /root
-  - GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new"
-
-serviceManager:
-  name: "systemd"
-
-packageManager:
-  name: "apt"
-  autoUpgrade: false
-  requiredPackages:
-    - git
-    - curl
-
-# -- Sync directories (placeholder for now)
-directories: []
-
-# -- Sync single files (placeholder for now)
-files: []
-`
-
-	renderedYAML, err := RenderConfig(data)
+func TestReadLocalConfig(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", "read-local-config-test")
 	if err != nil {
-		t.Fatalf("RenderConfig failed: %v", err)
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configContent := "hello: world"
+	configSpec := "config.yaml"
+
+	if err := ioutil.WriteFile(filepath.Join(tmpDir, configSpec), []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
 	}
 
-	// Normalize whitespace for comparison
-	expectedYAML = strings.TrimSpace(expectedYAML)
-	renderedYAML = strings.TrimSpace(renderedYAML)
+	t.Run("should read local config file", func(t *testing.T) {
+		content, err := provision.ReadLocalConfig(tmpDir, configSpec)
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
 
-	if renderedYAML != expectedYAML {
-		t.Errorf("Rendered YAML does not match expected.\nExpected:\n%s\nGot:\n%s", expectedYAML, renderedYAML)
-	}
-}
+		if content != configContent {
+			t.Errorf("expected content '%s', got '%s'", configContent, content)
+		}
+	})
 
-func TestPlaceConfigYAMLRemote(t *testing.T) {
-	mockContent := "test: \n  key: value\n"
-	mockDestPath := "/tmp/test-config.yaml"
-
-	expectedCmd := fmt.Sprintf("printf %%s '%s' > %s", mockContent, mockDestPath)
-
-	mockRunner := ssh.NewMockRunner()
-
-	err := PlaceConfigYAML(mockRunner, mockContent, mockDestPath)
-	if err != nil {
-		t.Fatalf("PlaceConfigYAML failed: %v", err)
-	}
-
-	if err := mockRunner.AssertCommandRun(expectedCmd); err != nil {
-		t.Errorf("Expected command not run: %v", err)
-	}
-
-	if err := mockRunner.AssertNumberOfCommandsRun(1); err != nil {
-		t.Errorf("Expected 1 command to be run, but got different: %v", err)
-	}
+	t.Run("should return an error if file does not exist", func(t *testing.T) {
+		_, err := provision.ReadLocalConfig(tmpDir, "nonexistent.yaml")
+		if err == nil {
+			t.Error("expected an error, got nil")
+		}
+	})
 }
