@@ -38,4 +38,13 @@ virsh net-dhcp-release default
     virsh undefine --remove-all-storage "${VM_NAME}" 
     sudo rm -f "/tmp/${VM_NAME}*"
 }
+
+# Or:
+{
+    for VM_NAME in $(virsh list | awk 'NR > 2 {print $2}' | xargs); do
+        virsh destroy "${VM_NAME}"
+        virsh undefine --remove-all-storage "${VM_NAME}" 
+        sudo rm -f "/tmp/${VM_NAME}*"
+    done
+}
 ```

@@ -163,6 +163,7 @@ func startContainerHelper(t *testing.T) (string, error) {
 			t.Log("SSH server is ready.")
 			return containerID, nil
 		}
+		fmt.Fprint(os.Stderr, ".")
 		time.Sleep(1 * time.Second)
 	}
 	t.Fatalf("SSH server in container %s did not become ready in time", containerID)

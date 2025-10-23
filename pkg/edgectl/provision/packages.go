@@ -37,25 +37,18 @@ func LoadPackageManager(pkgMgr string, rootConfigsPath string) (*PackageManager,
 }
 
 // ProvisionPackages installs a list of packages on the remote device.
-func ProvisionPackages(runner ssh.Runner, packages []string, pkgMgr string, repoURL string) error {
-	// Generate a unique temporary directory path on the remote device
-	tempDirCmd := "mktemp -d"
-	stdout, stderr, err := runner.Run(tempDirCmd)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary directory on remote: %w. Stdout: %s, Stderr: %s", err, stdout, stderr)
-	}
-	tempClonedRepoDir := strings.TrimSpace(stdout)
-
-	// Clone the Git repository onto the remote device
-	cloneCmd := fmt.Sprintf("git clone %s %s", repoURL, tempClonedRepoDir)
-	fmt.Printf("Cloning Git repository %s to %s on remote...\n", repoURL, tempClonedRepoDir)
-	if stdout, stderr, err := runner.Run(cloneCmd); err != nil {
-		return fmt.Errorf("failed to clone repository %s on remote: %w. Stdout: %s, Stderr: %s", repoURL, err, stdout, stderr)
-	}
-
-	pm, err := LoadPackageManager(pkgMgr, tempClonedRepoDir)
+func ProvisionPackages(runner ssh.Runner, packages []string, pkgMgr string, localPkgMgrRepoPath string, remoteEdgeCDRepoURL string, remoteEdgeCDRepoDestPath string) error {
+	// Load package manager configuration from the locally cloned repository
+	pm, err := LoadPackageManager(pkgMgr, localPkgMgrRepoPath)
 	if err != nil {
 		return err
+	}
+
+	// Clone the edge-cd repository to its destination path on the remote device
+	cloneCmd := fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath)
+	fmt.Printf("Cloning edge-cd repository %s to %s on remote...\n", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath)
+	if stdout, stderr, err := runner.Run(cloneCmd); err != nil {
+		return fmt.Errorf("failed to clone edge-cd repository %s on remote: %w. Stdout: %s, Stderr: %s", remoteEdgeCDRepoURL, err, stdout, stderr)
 	}
 
 	// Update package manager repos once

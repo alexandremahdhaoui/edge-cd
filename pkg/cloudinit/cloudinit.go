@@ -29,11 +29,13 @@ type User struct {
 	Sudo              string   `json:"sudo"`
 	Shell             string   `json:"shell"`
 	SSHAuthorizedKeys []string `json:"ssh_authorized_keys"`
+	SSHKeys           *SSHKeys `json:"ssh_keys,omitempty"`
+	SSHDeleteKeys     bool     `json:"ssh_deletekeys,omitempty"`
 }
 
-func NewUser(name string, authorizedKeyPathList ...string) (User, error) {
-	authorizedKeys := make([]string, 0, len(authorizedKeyPathList))
-	for _, path := range authorizedKeyPathList {
+func NewUser(name string, publicKeyPathList ...string) (User, error) {
+	authorizedKeys := make([]string, 0, len(publicKeyPathList))
+	for _, path := range publicKeyPathList {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			return User{}, fmt.Errorf("ERROR: Failed to read file: %v", err)
@@ -54,17 +56,11 @@ type SSHKeys struct {
 }
 
 type UserData struct {
-	Hostname      string  `json:"hostname"`
-	Users         []User  `json:"users"`
-	SSHKeys       SSHKeys `json:"ssh_keys"`
-	SSHDeleteKeys bool    `json:"ssh_deletekeys"`
+	Hostname string `json:"hostname"`
+	Users    []User `json:"users"`
 }
 
 func (ud UserData) Render() (string, error) {
-	if ud.SSHKeys.RSAPublic != "" {
-		ud.SSHDeleteKeys = true
-	}
-
 	b, err := yaml.Marshal(ud)
 	if err != nil {
 		return "", fmt.Errorf("Cannot render cloud-config from UserData: %v", err)
@@ -90,7 +86,7 @@ func NewRSAKeyFromPrivateKeyFile(privateKeyPath string) (SSHKeys, error) {
 	}
 
 	return SSHKeys{
-		RSAPrivate: string(privateKey),
+		RSAPrivate: strings.TrimSpace(string(privateKey)),
 		RSAPublic:  strings.TrimSpace(string(publicKey)),
 	}, nil
 }

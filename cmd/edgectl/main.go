@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/edgectl/provision"
@@ -82,20 +83,36 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to create SSH client: %v", err)
 		}
+
+		// Define remote paths
+		const remoteEdgeCDRepoDestPath = "/opt/edge-cd"
+		const userConfigRepoPath = "/opt/user-config"
+
+		// Clone edge-cd repo locally to get package manager configs
+		localEdgeCDRepoTempDir, err := os.MkdirTemp("", "edgectl-local-edge-cd-repo-")
+		if err != nil {
+			log.Fatalf("Failed to create temporary directory for local edge-cd repo: %v", err)
+		}
+		defer os.RemoveAll(localEdgeCDRepoTempDir) // Clean up temp directory
+
+		localCloneCmd := exec.Command("git", "clone", *edgeCDRepo, localEdgeCDRepoTempDir)
+		localCloneCmd.Stdout = os.Stderr
+		localCloneCmd.Stderr = os.Stderr
+		if err := localCloneCmd.Run(); err != nil {
+			log.Fatalf("Failed to clone edge-cd repository locally: %v", err)
+		}
+
 		// Package Provisioning
 		pkgs := strings.Split(*packages, ",")
 		if len(pkgs) > 0 {
-			if err := provision.ProvisionPackages(sshClient, pkgs, *packageManager, *edgeCDRepo); err != nil {
+			if err := provision.ProvisionPackages(sshClient, pkgs, *packageManager, localEdgeCDRepoTempDir, *edgeCDRepo, remoteEdgeCDRepoDestPath); err != nil {
 				log.Fatalf("Failed to provision packages: %v", err)
 			}
 		}
 
-		// Repo Cloning
-		const edgeCDRepoPath = "/opt/edge-cd"
-		const userConfigRepoPath = "/opt/user-config"
-
-		if err := provision.CloneOrPullRepo(sshClient, *edgeCDRepo, edgeCDRepoPath); err != nil {
-			log.Fatalf("Failed to clone edge-cd repo: %v", err)
+		// Repo Cloning (only user config repo needs to be cloned here, edge-cd repo is handled in ProvisionPackages)
+		if err := provision.CloneOrPullRepo(sshClient, *configRepo, userConfigRepoPath); err != nil {
+			log.Fatalf("Failed to clone user config repo: %v", err)
 		}
 		if err := provision.CloneOrPullRepo(sshClient, *configRepo, userConfigRepoPath); err != nil {
 			log.Fatalf("Failed to clone user config repo: %v", err)
@@ -131,6 +148,7 @@ func main() {
 		}
 
 		// Service Setup
+		const edgeCDRepoPath = "/usr/local/src/edge-cd" // Re-declare the constant here
 		if err := provision.SetupEdgeCDService(sshClient, *serviceManager, edgeCDRepoPath); err != nil {
 			log.Fatalf("Failed to setup edge-cd service: %v", err)
 		}

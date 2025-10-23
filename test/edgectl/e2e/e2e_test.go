@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +84,7 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	}
 
 	// -- Generate user data with VM's SSH public key
-	targetUser, err := cloudinit.NewUser("ubuntu", hostSSHKeyPath)
+	targetUser, err := cloudinit.NewUser("ubuntu", hostSSHKeyPath+".pub")
 	if err != nil {
 		t.Fatal(err.Error())
 	}
@@ -91,12 +92,13 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err.Error())
 	}
+	targetUser.SSHKeys = &sshKeys
 	userData := cloudinit.UserData{
-		Hostname:      "",
-		Users:         []cloudinit.User{targetUser},
-		SSHKeys:       sshKeys,
-		SSHDeleteKeys: false,
+		Hostname: vmName,
+		Users:    []cloudinit.User{targetUser},
 	}
+	rendered, _ := userData.Render()
+	fmt.Println(rendered)
 
 	// -- create new vm config
 	cfg := vmm.NewVMConfig(
@@ -104,8 +106,7 @@ func TestE2EBootstrapCommand(t *testing.T) {
 		imageCachePath,
 		userData,
 	)
-
-	t.Logf("[INFO] Creating VM with config %+v", cfg)
+	t.Logf("[INFO] Creating VM")
 	// --- Test VM Lifecycle ---
 	vmConn, dom, err := vmm.CreateVM(cfg)
 	if err != nil {
@@ -126,13 +127,13 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	}
 	t.Logf("VM %s has IP: %s", vmName, ipAddress)
 
-	// Get and log serial console output
-	consoleOutput, err := vmm.GetConsoleOutput(vmConn, dom)
-	if err != nil {
-		t.Logf("Failed to get console output: %v", err)
-	} else {
-		t.Logf("\n--- VM Console Output ---\n%s\n-------------------------", consoleOutput)
-	}
+	// // Get and log serial console output
+	// consoleOutput, err := vmm.GetConsoleOutput(vmConn, dom)
+	// if err != nil {
+	//   t.Logf("Failed to get console output: %v", err)
+	// } else {
+	//   t.Logf("\n--- VM Console Output ---\n%s\n-------------------------", consoleOutput)
+	// }
 
 	// Wait for SSH to be ready
 	sshClient, err := ssh.NewClient(
@@ -144,53 +145,70 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create SSH client: %v", err)
 	}
-	if err := sshClient.AwaitServer(30 * time.Second); err != nil {
+	// -- verify ssh server becomes available
+	if err := sshClient.AwaitServer(60 * time.Second); err != nil {
 		t.Fatalf("SSH server in VM %s did not become ready in time: %v", vmName, err)
 	}
+	t.Log("VM available via ssh")
 
-	// -- Setup Git server
-	repoName := "edge-cd"
+	// --- Setup Git server ---
 	localIPAddr, err := getLocalIPAddr()
 	if err != nil {
-		t.Fatalf("Failed to get local ip addr: %v", err)
+		t.Fatalf("Failed to get local IP address: %v", err)
 	}
-	repoSrcPath, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
+	b, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
 	if err != nil {
-		t.Fatalf("Error getting current repo path: %v", repoSrcPath)
+		t.Fatalf("Error getting current repo path: %v", err)
 	}
+	edgeCDRepoSrcPath := strings.TrimSpace(string(b))
+	// -- edge-cd repo
+	edgeCDRepoName := "edge-cd.git"
+	edgeCDRepoSource := gitserver.Source{
+		Type:      gitserver.LocalSource,
+		LocalPath: edgeCDRepoSrcPath,
+	}
+	// -- user config repo
+	userConfigRepoName := "user-config.git"
+	userConfigRepoSource := gitserver.Source{
+		Type:      gitserver.LocalSource,
+		LocalPath: edgeCDRepoSrcPath,
+	}
+
 	gitServer := gitserver.Server{
 		ServerAddr:  localIPAddr.String(),
-		SSHPort:     0,
+		SSHPort:     2222,
 		HostKeyPath: hostSSHKeyPath,
 		AuthorizedKeys: []string{
-			userData.SSHKeys.RSAPublic,             // pub key of the vm
-			userData.Users[0].SSHAuthorizedKeys[0], // pub key of the host
+			userData.Users[0].SSHKeys.RSAPublic,    // VM's public key for cloning from Git server
+			userData.Users[0].SSHAuthorizedKeys[0], // Host's public key for Git server's SSH client
 		},
 		BaseDir: t.TempDir(),
 		Repo: []gitserver.Repo{
-			{
-				Name: repoName,
-				Source: gitserver.Source{
-					Type:      gitserver.LocalSource,
-					LocalPath: "",
-				},
-			},
+			{Name: edgeCDRepoName, Source: edgeCDRepoSource},
+			{Name: userConfigRepoName, Source: userConfigRepoSource},
 		},
 	}
+
 	if err := gitServer.Run(); err != nil {
 		t.Fatalf("Failed to setup Git server: %v", err)
 	}
 	t.Cleanup(func() {
 		gitServer.Teardown()
 	})
-	gitRepoUrl := gitServer.GetRepoUrl(repoName)
-	t.Logf("Git Repository URL: %s", gitRepoUrl)
+
+	edgeCDRepoURL := gitServer.GetRepoUrl(edgeCDRepoName)
+	userConfigRepoURL := gitServer.GetRepoUrl(userConfigRepoName)
+	t.Logf("EdgeCD Repository URL: %s", edgeCDRepoURL)
+	t.Logf("User Config Repository URL: %s", userConfigRepoURL)
 
 	// Build the edgectl binary
 	binaryPath := buildEdgectlHelper(t)
 	configPath := "./test/edgectl/e2e/config"
 	configSpec := "config.yaml"
 
+	// Define remote destination path for edge-cd repo
+	remoteEdgeCDRepoDestPath := "/usr/local/src/edge-cd"
+	remoteUserConfigRepoDestPath := "/usr/local/src/edge-cd-config"
 	cmd = exec.Command(
 		binaryPath,
 		"bootstrap",
@@ -201,13 +219,13 @@ func TestE2EBootstrapCommand(t *testing.T) {
 		"--ssh-private-key",
 		hostSSHKeyPath, // Use host SSH key for edgectl's connection to VM
 		"--config-repo",
-		gitRepoUrl, // Use the Git server for config repo
+		userConfigRepoURL, // Use the Git server for user config repo
 		"--config-path",
 		configPath,
 		"--config-spec",
 		configSpec,
 		"--edge-cd-repo",
-		gitRepoUrl, // Use the Git server for edge-cd repo, which also serves package manager configs
+		edgeCDRepoURL, // Use the Git server for edge-cd repo, which also serves package manager configs
 		"--packages",
 		"git,curl,openssh-client", // Ensure git and ssh-client are installed on VM
 		"--service-manager",
@@ -229,14 +247,14 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	}
 
 	// Check repos
-	_, _, err = sshClient.Run("[ -d /opt/edge-cd/.git ]")
+	_, _, err = sshClient.Run(fmt.Sprintf("[ -d %s/.git ]", remoteEdgeCDRepoDestPath))
 	if err != nil {
-		t.Errorf("edge-cd repo not found: %v", err)
+		t.Errorf("edge-cd repo not found at %s: %v", remoteEdgeCDRepoDestPath, err)
 	}
 
-	_, _, err = sshClient.Run("[ -d /opt/user-config/.git ]")
+	_, _, err = sshClient.Run(fmt.Sprintf("[ -d %s/.git ]", remoteUserConfigRepoDestPath))
 	if err != nil {
-		t.Errorf("user-config repo not found: %v", err)
+		t.Errorf("user-config repo not found at %s: %v", remoteUserConfigRepoDestPath, err)
 	}
 
 	// Check config file

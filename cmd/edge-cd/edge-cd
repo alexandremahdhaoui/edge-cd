@@ -57,9 +57,7 @@ __DEFAULT_EDGE_CD_REPO_URL=https://github.com/alexandremahdhaoui/edge-cd.git
 __DEFAULT_EDGE_CD_COMMIT_PATH=/tmp/edge-cd/edge-cd-last-synchronized-commit.txt
 __DEFAULT_CONFIG_COMMIT_PATH=/tmp/edge-cd/config-last-synchronized-commit.txt
 
-__DEFAULT_CONFIG_REPO_BRANCH=main
 __DEFAULT_CONFIG_REPO_DESTINATION_PATH=/usr/local/src/edge-cd-config
-__DEFAULT_CONFIG_REPO_URL=https://github.com/alexandremahdhaoui/edge-cd-config.git
 
 function declare_config() {
 	# -- declare vars
@@ -98,13 +96,11 @@ function init_config() {
 	__BACKUP_CONFIG_PATH="$(read_value CONFIG_PATH '.config.path')"
 	__BACKUP_CONFIG_REPO_BRANCH="$(read_value CONFIG_REPO_BRANCH '.config.repo.branch' "${__DEFAULT_CONFIG_REPO_BRANCH}")"
 	__BACKUP_CONFIG_REPO_DESTINATION_PATH="$(read_value CONFIG_REPO_DESTINATION_PATH '.config.repo.destPath' "${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}")"
-	__BACKUP_CONFIG_REPO_URL="$(read_value CONFIG_REPO_URL '.config.repo.url' "${__DEFAULT_CONFIG_REPO_URL}")"
+	__BACKUP_CONFIG_REPO_URL="$(read_value CONFIG_REPO_URL '.config.repo.url')"
 
 	# -- edge config
 	__BACKUP_EDGE_CD_REPO_BRANCH="$(read_value EDGE_CD_REPO_BRANCH '.edgeCD.repo.branch' "${__DEFAULT_EDGE_CD_REPO_BRANCH}")"
-
 	__BACKUP_EDGE_CD_REPO_DESTINATION_PATH="$(read_value EDGE_CD_REPO_DESTINATION_PATH '.edgeCD.repo.destinationPath' "${__DEFAULT_EDGE_CD_REPO_DESTINATION_PATH}")"
-
 	__BACKUP_EDGE_CD_REPO_URL="$(read_value EDGE_CD_REPO_URL '.edgeCD.repo.url' "${__DEFAULT_EDGE_CD_REPO_URL}")"
 
 	__BACKUP_EDGE_CD_COMMIT_PATH="$(read_value EDGE_CD_COMMIT_PATH '.edgeCD.commitPath' "${__DEFAULT_EDGE_CD_COMMIT_PATH}")"

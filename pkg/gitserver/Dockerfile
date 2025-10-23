@@ -1,9 +1,9 @@
-FROM alpine:latest
+FROM ubuntu:latest
 
-RUN apk update && \
-    apk add --no-cache openssh git bash
+RUN apt-get update && \
+    apt-get install -y openssh-server git bash
 
-RUN adduser -D git -s /usr/bin/git-shell && \
+RUN useradd -m -d /srv/git -s /usr/bin/git-shell git && \
     mkdir -p /home/git/.ssh && \
     chmod 0700 /home/git/.ssh && \
     chown -R git:git /home/git

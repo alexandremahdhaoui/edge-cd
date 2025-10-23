@@ -128,7 +128,7 @@ func (s *Server) buildImage() error {
 		"build",
 		"-t",
 		s.imgName,
-		filepath.Join("testdata", "git-server"),
+		s.buildDir,
 	)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -138,8 +138,8 @@ func (s *Server) buildImage() error {
 func (s *Server) setupAuthorizedKeys() error {
 	// Write public keys to authorized_keys
 	authKeysContent := strings.Join(s.AuthorizedKeys, "\n")
-	authKeysPath := filepath.Join(s.authorizedKeysFile, "authorized_keys")
-	if err := os.WriteFile(authKeysContent, []byte(authKeysPath), 0o644); err != nil {
+	authKeysPath := s.authorizedKeysFile
+	if err := os.WriteFile(authKeysPath, []byte(authKeysContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write authorized_keys: %w", err)
 	}
 
@@ -148,7 +148,7 @@ func (s *Server) setupAuthorizedKeys() error {
 
 func (s *Server) start() error {
 	// Run the Git server container
-	containerName := fmt.Sprintf("git-server-%d", time.Now().UnixNano())
+	containerName := fmt.Sprintf("gitserver-%d", time.Now().UnixNano())
 	cmd := exec.Command(
 		"docker", "run", "-d",
 		"--name", containerName,
@@ -182,7 +182,7 @@ func (s *Server) Teardown() error {
 }
 
 func (s *Server) sshClient() (*ssh.Client, error) {
-	gitServerAddr := fmt.Sprintf("localhost:%d", s.SSHPort)
+	gitServerAddr := fmt.Sprintf("%s:%d", s.ServerAddr, s.SSHPort)
 	sshClient, err := ssh.NewClient(gitServerAddr, "git", s.HostKeyPath, "22")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SSH client for Git server: %w", err)

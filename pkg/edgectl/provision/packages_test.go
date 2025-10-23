@@ -1,6 +1,7 @@
 package provision_test
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -26,27 +27,32 @@ install: ["apt-get", "install", "-y"]
 	}
 
 	t.Run("should install multiple packages with apt", func(t *testing.T) {
-		mock := &ssh.MockRunner{
-			RunResponses: []ssh.RunResponse{
-				{Err: nil}, // update
-				{Err: nil}, // install
-			},
-		}
+		mock := ssh.NewMockRunner()
 		packages := []string{"git", "curl"}
-		if err := provision.ProvisionPackages(mock, packages, "apt", tmpDir); err != nil {
+		localPkgMgrRepoPath := tmpDir
+		remoteEdgeCDRepoURL := "https://github.com/alexandremahdhaoui/edge-cd.git"
+		remoteEdgeCDRepoDestPath := "/usr/local/src/edge-cd"
+
+		// Set expected responses for the mock runner
+		mock.SetResponse(fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath), "", "", nil)
+		mock.SetResponse("apt-get update", "", "", nil)
+		mock.SetResponse("apt-get install -y git curl", "", "", nil)
+
+		if err := provision.ProvisionPackages(mock, packages, "apt", localPkgMgrRepoPath, remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath); err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 
 		expectedCommands := []string{
+			fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath),
 			"apt-get update",
 			"apt-get install -y git curl",
 		}
 
-		if len(mock.RunCommands) != len(expectedCommands) {
-			t.Fatalf("expected %d commands, got %d", len(expectedCommands), len(mock.RunCommands))
+		if err := mock.AssertNumberOfCommandsRun(len(expectedCommands)); err != nil {
+			t.Fatal(err)
 		}
 
-		for i, cmd := range mock.RunCommands {
+		for i, cmd := range mock.Commands {
 			if cmd != expectedCommands[i] {
 				t.Errorf("expected command '%s' at index %d, got '%s'", expectedCommands[i], i, cmd)
 			}
@@ -54,22 +60,33 @@ install: ["apt-get", "install", "-y"]
 	})
 
 	t.Run("should do nothing if no packages are provided", func(t *testing.T) {
-		mock := &ssh.MockRunner{
-			RunResponses: []ssh.RunResponse{
-				{Err: nil}, // update
-			},
-		}
+		mock := ssh.NewMockRunner()
 		var packages []string
-		if err := provision.ProvisionPackages(mock, packages, "apt", tmpDir); err != nil {
+		localPkgMgrRepoPath := tmpDir
+		remoteEdgeCDRepoURL := "https://github.com/alexandremahdhaoui/edge-cd.git"
+		remoteEdgeCDRepoDestPath := "/usr/local/src/edge-cd"
+
+		// Set expected responses for the mock runner
+		mock.SetResponse(fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath), "", "", nil)
+		mock.SetResponse("apt-get update", "", "", nil)
+
+		if err := provision.ProvisionPackages(mock, packages, "apt", localPkgMgrRepoPath, remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath); err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 
 		expectedCommands := []string{
+			fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath),
 			"apt-get update",
 		}
 
-		if len(mock.RunCommands) != len(expectedCommands) {
-			t.Fatalf("expected %d commands, got %d", len(expectedCommands), len(mock.RunCommands))
+		if err := mock.AssertNumberOfCommandsRun(len(expectedCommands)); err != nil {
+			t.Fatal(err)
+		}
+
+		for i, cmd := range mock.Commands {
+			if cmd != expectedCommands[i] {
+				t.Errorf("expected command '%s' at index %d, got '%s'", expectedCommands[i], i, cmd)
+			}
 		}
 	})
 }

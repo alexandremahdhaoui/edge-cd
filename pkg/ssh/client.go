@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -87,12 +88,12 @@ func (c *Client) AwaitServer(timeout time.Duration) error {
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For testing, ignore host key verification
-		Timeout:         5 * time.Second,             // Shorter timeout for each attempt
+		Timeout:         10 * time.Second,
 	}
 
 	addr := net.JoinHostPort(c.Host, c.Port)
 	timeoutChan := time.After(timeout)
-	tick := time.NewTicker(2 * time.Second)
+	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
 
 	for {
@@ -101,10 +102,19 @@ func (c *Client) AwaitServer(timeout time.Duration) error {
 			return fmt.Errorf("timed out waiting for SSH server at %s", addr)
 		case <-tick.C:
 			conn, err := ssh.Dial("tcp", addr, config)
-			if err == nil {
-				conn.Close()
-				return nil // SSH server is available
+			if err != nil {
+				b, _ := json.Marshal(config)
+				fmt.Printf(
+					"failed to ssh to addr=%s\nwith config=%s\nwith err=%v\n",
+					addr,
+					string(b),
+					err,
+				)
+				continue
 			}
+
+			_ = conn.Close()
+			return nil // SSH server is available
 		}
 	}
 }
