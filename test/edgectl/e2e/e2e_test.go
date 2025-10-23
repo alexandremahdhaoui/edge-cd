@@ -2,13 +2,15 @@ package e2e
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/cloudinit"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/gitserver"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 	"libvirt.org/go/libvirt"
@@ -42,16 +44,24 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	imageURL := "https://cloud-images.ubuntu.com/releases/noble/release/" + imageName
 	imageCachePath := filepath.Join(cacheDir, imageName)
 
-	// Generate SSH key pair in the temporary directory
-	sshKeyPath := filepath.Join(tempDir, "id_rsa")
-	cmd := exec.Command("ssh-keygen", "-t", "rsa", "-b", "2048", "-f", sshKeyPath, "-N", "")
+	// Generate SSH key pair for the host (for connecting to Git server)
+	hostSSHKeyPath := filepath.Join(tempDir, "id_rsa_host")
+	cmd := exec.Command("ssh-keygen", "-t", "rsa", "-b", "2048", "-f", hostSSHKeyPath, "-N", "")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to generate SSH key pair: %v\nOutput: %s", err, output)
+		t.Fatalf("Failed to generate host SSH key pair: %v\nOutput: %s", err, output)
+	}
+	if err := os.Chmod(hostSSHKeyPath, 0o600); err != nil {
+		t.Fatalf("Failed to set permissions on host SSH private key: %v", err)
 	}
 
-	// Set restrictive permissions on the private key file
-	if err := os.Chmod(sshKeyPath, 0o600); err != nil {
-		t.Fatalf("Failed to set permissions on SSH private key: %v", err)
+	// Generate SSH key pair for the VM (for git clone from VM to Git server)
+	vmSSHKeyPath := filepath.Join(tempDir, "id_rsa_vm")
+	cmd = exec.Command("ssh-keygen", "-t", "rsa", "-b", "2048", "-f", vmSSHKeyPath, "-N", "")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Failed to generate VM SSH key pair: %v\nOutput: %s", err, output)
+	}
+	if err := os.Chmod(vmSSHKeyPath, 0o600); err != nil {
+		t.Fatalf("Failed to set permissions on VM SSH private key: %v", err)
 	}
 
 	// Download image if not exists
@@ -72,27 +82,28 @@ func TestE2EBootstrapCommand(t *testing.T) {
 		}
 	}
 
-	// Generate user data with SSH public key
-	sshPublicKey, err := getSSHPublicKey(sshKeyPath)
+	// -- Generate user data with VM's SSH public key
+	targetUser, err := cloudinit.NewUser("ubuntu", hostSSHKeyPath)
 	if err != nil {
-		t.Fatalf("Failed to get SSH public key: %v", err)
+		t.Fatal(err.Error())
 	}
-	t.Logf("SSH Public Key: %s", sshPublicKey)
+	sshKeys, err := cloudinit.NewRSAKeyFromPrivateKeyFile(vmSSHKeyPath)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	userData := cloudinit.UserData{
+		Hostname:      "",
+		Users:         []cloudinit.User{targetUser},
+		SSHKeys:       sshKeys,
+		SSHDeleteKeys: false,
+	}
 
-	targetUser := "ubuntu"
-	userData := fmt.Sprintf(`
-#cloud-config
-hostname: %s
-users:
-  - name: %s
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    shell: /bin/bash
-    ssh_authorized_keys:
-      - %q
-`, vmName, targetUser, sshPublicKey)
-
-	cfg := vmm.NewVMConfig(vmName, imageCachePath, sshKeyPath)
-	cfg.UserData = userData
+	// -- create new vm config
+	cfg := vmm.NewVMConfig(
+		vmName,
+		imageCachePath,
+		userData,
+	)
 
 	t.Logf("[INFO] Creating VM with config %+v", cfg)
 	// --- Test VM Lifecycle ---
@@ -115,8 +126,21 @@ users:
 	}
 	t.Logf("VM %s has IP: %s", vmName, ipAddress)
 
+	// Get and log serial console output
+	consoleOutput, err := vmm.GetConsoleOutput(vmConn, dom)
+	if err != nil {
+		t.Logf("Failed to get console output: %v", err)
+	} else {
+		t.Logf("\n--- VM Console Output ---\n%s\n-------------------------", consoleOutput)
+	}
+
 	// Wait for SSH to be ready
-	sshClient, err := ssh.NewClient(ipAddress, "ubuntu", sshKeyPath, "22")
+	sshClient, err := ssh.NewClient(
+		ipAddress,
+		"ubuntu",
+		hostSSHKeyPath,
+		"22",
+	) // Use hostSSHKeyPath for initial SSH connection to VM
 	if err != nil {
 		t.Fatalf("Failed to create SSH client: %v", err)
 	}
@@ -124,24 +148,72 @@ users:
 		t.Fatalf("SSH server in VM %s did not become ready in time: %v", vmName, err)
 	}
 
+	// -- Setup Git server
+	repoName := "edge-cd"
+	localIPAddr, err := getLocalIPAddr()
+	if err != nil {
+		t.Fatalf("Failed to get local ip addr: %v", err)
+	}
+	repoSrcPath, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
+	if err != nil {
+		t.Fatalf("Error getting current repo path: %v", repoSrcPath)
+	}
+	gitServer := gitserver.Server{
+		ServerAddr:  localIPAddr.String(),
+		SSHPort:     0,
+		HostKeyPath: hostSSHKeyPath,
+		AuthorizedKeys: []string{
+			userData.SSHKeys.RSAPublic,             // pub key of the vm
+			userData.Users[0].SSHAuthorizedKeys[0], // pub key of the host
+		},
+		BaseDir: t.TempDir(),
+		Repo: []gitserver.Repo{
+			{
+				Name: repoName,
+				Source: gitserver.Source{
+					Type:      gitserver.LocalSource,
+					LocalPath: "",
+				},
+			},
+		},
+	}
+	if err := gitServer.Run(); err != nil {
+		t.Fatalf("Failed to setup Git server: %v", err)
+	}
+	t.Cleanup(func() {
+		gitServer.Teardown()
+	})
+	gitRepoUrl := gitServer.GetRepoUrl(repoName)
+	t.Logf("Git Repository URL: %s", gitRepoUrl)
+
 	// Build the edgectl binary
 	binaryPath := buildEdgectlHelper(t)
-	edgCDRepo := "https://github.com/alexandremahdhaoui/edge-cd.git"
 	configPath := "./test/edgectl/e2e/config"
 	configSpec := "config.yaml"
 
 	cmd = exec.Command(
 		binaryPath,
 		"bootstrap",
-		"--target", ipAddress,
-		"--user", targetUser,
-		"--config-repo", edgCDRepo,
-		"--config-path", configPath,
-		"--config-spec", configSpec,
-		"--edge-cd-repo", edgCDRepo,
-		"--packages", "git,curl",
-		"--service-manager", "systemd",
-		"--package-manager", "apt",
+		"--target-addr",
+		ipAddress,
+		"--target-user",
+		targetUser.Name,
+		"--ssh-private-key",
+		hostSSHKeyPath, // Use host SSH key for edgectl's connection to VM
+		"--config-repo",
+		gitRepoUrl, // Use the Git server for config repo
+		"--config-path",
+		configPath,
+		"--config-spec",
+		configSpec,
+		"--edge-cd-repo",
+		gitRepoUrl, // Use the Git server for edge-cd repo, which also serves package manager configs
+		"--packages",
+		"git,curl,openssh-client", // Ensure git and ssh-client are installed on VM
+		"--service-manager",
+		"systemd",
+		"--package-manager",
+		"apt",
 	)
 
 	cmd.Stdout = os.Stderr
@@ -151,9 +223,9 @@ users:
 	}
 
 	// Check packages
-	_, _, err = sshClient.Run("dpkg -s git && dpkg -s curl")
+	_, _, err = sshClient.Run("dpkg -s git && dpkg -s curl && dpkg -s openssh-client")
 	if err != nil {
-		t.Errorf("git and curl not installed: %v", err)
+		t.Errorf("git, curl, or openssh-client not installed: %v", err)
 	}
 
 	// Check repos
@@ -191,22 +263,6 @@ users:
 	}
 }
 
-// getSSHPublicKey reads the public key from the given private key path.
-func getSSHPublicKey(privateKeyPath string) (string, error) {
-	// For now, assume id_rsa.pub exists next to id_rsa
-	publicKeyPath := privateKeyPath + ".pub"
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("SSH public key not found at %s", publicKeyPath)
-	}
-
-	publicKeyBytes, err := os.ReadFile(publicKeyPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read SSH public key: %w", err)
-	}
-
-	return strings.TrimSpace(string(publicKeyBytes)), nil
-}
-
 // buildEdgectlHelper builds the edgectl binary and returns its path.
 // It creates a temporary directory for the binary and cleans it up after the test.
 func buildEdgectlHelper(t *testing.T) string {
@@ -230,4 +286,15 @@ func buildEdgectlHelper(t *testing.T) string {
 	}
 
 	return binaryPath
+}
+
+func getLocalIPAddr() (net.IP, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	// Get the local address used for that connection
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP, nil
 }

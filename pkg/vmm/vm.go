@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/cloudinit"
 	"libvirt.org/go/libvirt"
 )
 
@@ -27,11 +28,10 @@ type VMConfig struct {
 	MemoryMB       uint
 	VCPUs          uint
 	Network        string
-	UserData       string // Cloud-init user-data
-	SSHKeyPath     string // Path to the SSH private key for connecting to the VM
+	UserData       cloudinit.UserData
 }
 
-func NewVMConfig(name, imagePath, sshKeyPath string) VMConfig {
+func NewVMConfig(name, imagePath string, userData cloudinit.UserData) VMConfig {
 	return VMConfig{
 		Name:           name,
 		ImageQCOW2Path: imagePath,
@@ -39,7 +39,7 @@ func NewVMConfig(name, imagePath, sshKeyPath string) VMConfig {
 		MemoryMB:       defaultMemoryMB,
 		VCPUs:          defaultVCPUs,
 		Network:        defaultNetwork,
-		SSHKeyPath:     sshKeyPath,
+		UserData:       userData,
 	}
 }
 
@@ -49,7 +49,12 @@ func CreateVM(cfg VMConfig) (*libvirt.Connect, *libvirt.Domain, error) {
 		return nil, nil, fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
 
-	cloudInitISOPath, err := generateCloudInitISO(cfg.Name, cfg.UserData)
+	userData, err := cfg.UserData.Render()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cloudInitISOPath, err := generateCloudInitISO(cfg.Name, userData)
 	if err != nil {
 		conn.Close()
 		return nil, nil, fmt.Errorf("failed to generate cloud-init ISO: %w", err)

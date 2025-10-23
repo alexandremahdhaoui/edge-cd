@@ -11,6 +11,7 @@ import (
 
 	"libvirt.org/go/libvirt"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/cloudinit"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 )
@@ -73,26 +74,23 @@ func TestVMLifecycle(t *testing.T) {
 		}
 	}
 
-	// Generate user data with SSH public key
-	sshPublicKey, err := getSSHPublicKey(sshKeyPath)
+	// -- Generate user data with VM's SSH public key
+	targetUser, err := cloudinit.NewUser("ubuntu", sshKeyPath)
 	if err != nil {
-		t.Fatalf("Failed to get SSH public key: %v", err)
+		t.Fatal(err.Error())
 	}
-	t.Logf("SSH Public Key: %s", sshPublicKey)
+	userData := cloudinit.UserData{
+		Hostname:      "",
+		Users:         []cloudinit.User{targetUser},
+		SSHDeleteKeys: false,
+	}
 
-	userData := fmt.Sprintf(`
-#cloud-config
-hostname: %s
-users:
-  - name: ubuntu
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    shell: /bin/bash
-    ssh_authorized_keys:
-      - %q
-`, vmName, sshPublicKey)
-
-	cfg := vmm.NewVMConfig(vmName, imageCachePath, sshKeyPath)
-	cfg.UserData = userData
+	// -- create new vm config
+	cfg := vmm.NewVMConfig(
+		vmName,
+		imageCachePath,
+		userData,
+	)
 
 	t.Logf("[INFO] Creating VM with config %+v", cfg)
 	// --- Test VM Lifecycle ---
@@ -143,7 +141,7 @@ users:
 			)
 
 		case <-sshTick.C:
-			sshClient, sshErr = ssh.NewClient(ipAddress, "ubuntu", cfg.SSHKeyPath, "22")
+			sshClient, sshErr = ssh.NewClient(ipAddress, "ubuntu", sshKeyPath, "22")
 			if sshErr != nil {
 				t.Logf("SSH connection failed: %v, retrying...", sshErr)
 				continue

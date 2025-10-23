@@ -21,7 +21,7 @@ func TestProvisionPackages(t *testing.T) {
 update: ["apt-get", "update"]
 install: ["apt-get", "install", "-y"]
 `
-	if err := ioutil.WriteFile(filepath.Join(tmpDir, "apt.yaml"), []byte(aptYaml), 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(tmpDir, "apt.yaml"), []byte(aptYaml), 0o644); err != nil {
 		t.Fatalf("Failed to write apt.yaml: %v", err)
 	}
 

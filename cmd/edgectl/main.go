@@ -39,9 +39,9 @@ func main() {
 		bootstrapCmd := flag.NewFlagSet("bootstrap", flag.ExitOnError)
 
 		// Define flags for the bootstrap command
-		target := bootstrapCmd.String("target", "", "Target device (user@host) (required)")
-		user := bootstrapCmd.String("user", "root", "SSH user for the target device")
-		key := bootstrapCmd.String("key", "~/.ssh/id_rsa", "Path to the SSH private key")
+		targetAddr := bootstrapCmd.String("target-addr", "", "Target device address (e.g., user@host or host)")
+		targetUser := bootstrapCmd.String("target-user", "root", "SSH user for the target device")
+		sshPrivateKey := bootstrapCmd.String("ssh-private-key", "", "Path to the SSH private key (required)")
 		configRepo := bootstrapCmd.String("config-repo", "", "URL of the configuration Git repository (required)")
 		configPath := bootstrapCmd.String("config-path", "", "Path to the directory containing the config spec file")
 		configSpec := bootstrapCmd.String("config-spec", "", "Name of the config spec file")
@@ -59,33 +59,33 @@ func main() {
 		bootstrapCmd.Parse(rootCmd.Args()[1:])
 
 		// Validate required flags
-		if *target == "" {
-			fmt.Fprintf(os.Stderr, "Error: --target is required\n")
+		if *targetAddr == "" {
+			fmt.Fprintf(os.Stderr, "Error: --target-addr is required\n")
 			bootstrapCmd.Usage()
 			os.Exit(1)
 		}
 
-		// Split target into user and host
-		targetParts := strings.Split(*target, "@")
-		var targetUser, targetHost string
-		if len(targetParts) == 2 {
-			targetUser = targetParts[0]
-			targetHost = targetParts[1]
-		} else {
-			targetUser = *user
-			targetHost = *target
+		if *configRepo == "" {
+			fmt.Fprintf(os.Stderr, "Error: --config-repo is required\n")
+			bootstrapCmd.Usage()
+			os.Exit(1)
+		}
+
+		if *sshPrivateKey == "" {
+			fmt.Fprintf(os.Stderr, "Error: --ssh-private-key is required\n")
+			bootstrapCmd.Usage()
+			os.Exit(1)
 		}
 
 		// SSH Client
-		sshClient, err := ssh.NewClient(targetHost, targetUser, *key, "22")
+		sshClient, err := ssh.NewClient(*targetAddr, *targetUser, *sshPrivateKey, "22")
 		if err != nil {
 			log.Fatalf("Failed to create SSH client: %v", err)
 		}
-
 		// Package Provisioning
 		pkgs := strings.Split(*packages, ",")
 		if len(pkgs) > 0 {
-			if err := provision.ProvisionPackages(sshClient, pkgs, *packageManager, "./cmd/edge-cd/package-managers"); err != nil {
+			if err := provision.ProvisionPackages(sshClient, pkgs, *packageManager, *edgeCDRepo); err != nil {
 				log.Fatalf("Failed to provision packages: %v", err)
 			}
 		}
@@ -122,7 +122,7 @@ func main() {
 			}
 		}
 
-		if err := sshClient.Run("mkdir -p /etc/edge-cd"); err != nil {
+		if _, _, err := sshClient.Run("mkdir -p /etc/edge-cd"); err != nil {
 			// ignore error if directory already exists
 		}
 

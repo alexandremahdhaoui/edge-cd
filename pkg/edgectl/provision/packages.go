@@ -12,46 +12,55 @@ import (
 
 // PackageManager holds the commands for a specific package manager.
 type PackageManager struct {
-	UpdateCmd  []string
-	InstallCmd []string
-}
-
-// PackageManagerCommands represents the structure of the package manager YAML files.
-type PackageManagerCommands struct {
 	Update  []string `yaml:"update"`
 	Install []string `yaml:"install"`
 }
 
-// LoadPackageManager reads a package manager's configuration from a YAML file.
-func LoadPackageManager(pkgMgr string, configsPath string) (*PackageManager, error) {
-	yamlPath := filepath.Join(configsPath, pkgMgr+".yaml")
-	yamlFile, err := ioutil.ReadFile(yamlPath)
+// LoadPackageManager reads a package manager's configuration from a local path.
+func LoadPackageManager(pkgMgr string, rootConfigsPath string) (*PackageManager, error) {
+	configPath := filepath.Join(rootConfigsPath, "cmd", "edge-cd", "package-managers", pkgMgr+".yaml")
+	yamlFile, err := ioutil.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read package manager config %s: %w", yamlPath, err)
+		return nil, fmt.Errorf("failed to read package manager config from %s: %w", configPath, err)
 	}
 
-	var commands PackageManagerCommands
+	var commands PackageManager
 	err = yaml.Unmarshal(yamlFile, &commands)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal package manager config %s: %w", yamlPath, err)
+		return nil, fmt.Errorf("failed to unmarshal package manager config from %s: %w", configPath, err)
 	}
 
 	return &PackageManager{
-		UpdateCmd:  commands.Update,
-		InstallCmd: commands.Install,
+		Update:  commands.Update,
+		Install: commands.Install,
 	}, nil
 }
 
 // ProvisionPackages installs a list of packages on the remote device.
-func ProvisionPackages(runner ssh.Runner, packages []string, pkgMgr, configsPath string) error {
-	pm, err := LoadPackageManager(pkgMgr, configsPath)
+func ProvisionPackages(runner ssh.Runner, packages []string, pkgMgr string, repoURL string) error {
+	// Generate a unique temporary directory path on the remote device
+	tempDirCmd := "mktemp -d"
+	stdout, stderr, err := runner.Run(tempDirCmd)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary directory on remote: %w. Stdout: %s, Stderr: %s", err, stdout, stderr)
+	}
+	tempClonedRepoDir := strings.TrimSpace(stdout)
+
+	// Clone the Git repository onto the remote device
+	cloneCmd := fmt.Sprintf("git clone %s %s", repoURL, tempClonedRepoDir)
+	fmt.Printf("Cloning Git repository %s to %s on remote...\n", repoURL, tempClonedRepoDir)
+	if stdout, stderr, err := runner.Run(cloneCmd); err != nil {
+		return fmt.Errorf("failed to clone repository %s on remote: %w. Stdout: %s, Stderr: %s", repoURL, err, stdout, stderr)
+	}
+
+	pm, err := LoadPackageManager(pkgMgr, tempClonedRepoDir)
 	if err != nil {
 		return err
 	}
 
 	// Update package manager repos once
-	if len(pm.UpdateCmd) > 0 {
-		updateCmdStr := strings.Join(pm.UpdateCmd, " ")
+	if len(pm.Update) > 0 {
+		updateCmdStr := strings.Join(pm.Update, " ")
 		fmt.Printf("Updating package manager using %s...\n", pkgMgr)
 		if stdout, stderr, err := runner.Run(updateCmdStr); err != nil {
 			return fmt.Errorf("failed to update package manager: %w. Stdout: %s, Stderr: %s", err, stdout, stderr)
@@ -60,7 +69,7 @@ func ProvisionPackages(runner ssh.Runner, packages []string, pkgMgr, configsPath
 
 	// Install all packages in one command
 	if len(packages) > 0 {
-		installCmdSlice := append(pm.InstallCmd, packages...)
+		installCmdSlice := append(pm.Install, packages...)
 		installCmdStr := strings.Join(installCmdSlice, " ")
 		fmt.Printf("Installing packages using %s...\n", pkgMgr)
 		if stdout, stderr, err := runner.Run(installCmdStr); err != nil {
