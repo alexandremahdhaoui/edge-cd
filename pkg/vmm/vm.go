@@ -1,4 +1,4 @@
-package e2e
+package vmm
 
 import (
 	"bytes"
@@ -194,7 +194,11 @@ func generateCloudInitISO(vmName, userData string) (string, error) {
 		cloudInitDir,
 	)
 	if output, err := xorrisoCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("failed to create cloud-init ISO with xorriso: %w\nOutput: %s", err, output)
+		return "", fmt.Errorf(
+			"failed to create cloud-init ISO with xorriso: %w\nOutput: %s",
+			err,
+			output,
+		)
 	}
 	return isoPath, nil
 }
@@ -230,7 +234,7 @@ func GetVMIPAddress(conn *libvirt.Connect, dom *libvirt.Domain) (string, error) 
 	}
 }
 
-func getConsoleOutput(conn *libvirt.Connect, dom *libvirt.Domain) (string, error) {
+func GetConsoleOutput(conn *libvirt.Connect, dom *libvirt.Domain) (string, error) {
 	domainName, err := dom.GetName()
 	if err != nil {
 		return "", fmt.Errorf("failed to get domain name: %w", err)

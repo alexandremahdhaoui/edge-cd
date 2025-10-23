@@ -2,429 +2,247 @@ package e2e
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/alexandremahdhaoui/edge-cd/pkg/edgectl/provision"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
+	"libvirt.org/go/libvirt"
 )
 
-func TestE2EFramework(t *testing.T) {
-	preTestCleanup(t) // Call pre-test cleanup
+func TestE2EBootstrapCommand(t *testing.T) {
+	// Skip test if libvirt is not available or if running in CI without KVM
+	if os.Getenv("CI") == "true" && os.Getenv("LIBVIRT_TEST") != "true" {
+		t.Skip("Skipping libvirt VM lifecycle test in CI without LIBVIRT_TEST=true")
+	}
+
+	// Ensure libvirt connection is possible (basic check)
+	conn, err := libvirt.NewConnect("qemu:///system")
+	if err != nil {
+		t.Skipf("Skipping libvirt VM lifecycle test: failed to connect to libvirt: %v", err)
+	}
+	conn.Close()
+
+	// --- Configuration ---
+
+	// Create a temporary directory for test artifacts
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(os.TempDir(), "edgectl")
+	fmt.Println(cacheDir)
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatalf("failed to create cache directory for vm image %q", cacheDir)
+	}
+
+	vmName := fmt.Sprintf("test-vm-%d", time.Now().UnixNano())
+	imageName := "ubuntu-24.04-server-cloudimg-amd64.img"
+	imageURL := "https://cloud-images.ubuntu.com/releases/noble/release/" + imageName
+	imageCachePath := filepath.Join(cacheDir, imageName)
+
+	// Generate SSH key pair in the temporary directory
+	sshKeyPath := filepath.Join(tempDir, "id_rsa")
+	cmd := exec.Command("ssh-keygen", "-t", "rsa", "-b", "2048", "-f", sshKeyPath, "-N", "")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Failed to generate SSH key pair: %v\nOutput: %s", err, output)
+	}
+
+	// Set restrictive permissions on the private key file
+	if err := os.Chmod(sshKeyPath, 0o600); err != nil {
+		t.Fatalf("Failed to set permissions on SSH private key: %v", err)
+	}
+
+	// Download image if not exists
+	if _, err := os.Stat(imageCachePath); os.IsNotExist(err) {
+		t.Logf("Downloading VM image from %s to %s...", imageURL, imageCachePath)
+		cmd := exec.Command(
+			"wget",
+			"--progress=dot",
+			"-e", "dotbytes=3M",
+			"-O", imageCachePath,
+			imageURL,
+		)
+
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("Failed to download VM image: %v", err)
+		}
+	}
+
+	// Generate user data with SSH public key
+	sshPublicKey, err := getSSHPublicKey(sshKeyPath)
+	if err != nil {
+		t.Fatalf("Failed to get SSH public key: %v", err)
+	}
+	t.Logf("SSH Public Key: %s", sshPublicKey)
+
+	userData := fmt.Sprintf(`
+#cloud-config
+hostname: %s
+users:
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - %q
+`, vmName, sshPublicKey)
+
+	cfg := vmm.NewVMConfig(vmName, imageCachePath, sshKeyPath)
+	cfg.UserData = userData
+
+	t.Logf("[INFO] Creating VM with config %+v", cfg)
+	// --- Test VM Lifecycle ---
+	vmConn, dom, err := vmm.CreateVM(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create VM: %v", err)
+	}
+	defer func() {
+		if err := vmm.DestroyVM(vmConn, dom); err != nil {
+			t.Errorf("Failed to destroy VM: %v", err)
+		}
+	}()
+
+	t.Log("[INFO] Retrieving VM IP Adrr...")
+	var ipAddress string
+	ipAddress, err = vmm.GetVMIPAddress(vmConn, dom)
+
+	if err != nil || ipAddress == "" {
+		t.Fatalf("Failed to get VM IP address: %v", err)
+	}
+	t.Logf("VM %s has IP: %s", vmName, ipAddress)
+
+	// Wait for SSH to be ready
+	sshClient, err := ssh.NewClient(ipAddress, "ubuntu", sshKeyPath, "22")
+	if err != nil {
+		t.Fatalf("Failed to create SSH client: %v", err)
+	}
+	if err := sshClient.AwaitServer(30 * time.Second); err != nil {
+		t.Fatalf("SSH server in VM %s did not become ready in time: %v", vmName, err)
+	}
 
 	// Build the edgectl binary
 	binaryPath := buildEdgectlHelper(t)
-
-	// Get host's SSH public key and private key path
-	privateKeyPath, sshPublicKey := getOrCreateSSHKeyPair(t)
-
-	// Build the e2e target image (this is already done in TestDockerLifecycle, but good to ensure here)
-	buildCmd := exec.Command(
-		"docker",
-		"build",
-		"-t",
-		e2eTargetImage,
-		"--build-arg",
-		"SSH_PUBLIC_KEY="+sshPublicKey,
-		"./testdata",
-	)
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to build Docker image %s: %v\nOutput: %s", e2eTargetImage, err, output)
-	}
-
-	// Start the Docker container
-	containerID, err := startContainerHelper(t)
-	if err != nil {
-		t.Fatalf("Failed to start container: %v", err)
-	}
-
-	// Ensure cleanup happens
-	t.Cleanup(func() {
-		if containerID != "" {
-			stopContainerHelper(t, containerID)
-			cleanupContainerHelper(t, containerID)
-		}
-	})
-
-	t.Logf("Running edgectl bootstrap --help inside container %s", containerID)
 
 	// Copy the edgectl binary to the container
 	scmd := exec.Command(
 		"scp",
 		"-i",
-		privateKeyPath,
+		sshKeyPath,
 		"-o",
 		"StrictHostKeyChecking=no",
 		"-o",
 		"UserKnownHostsFile=/dev/null",
 		"-P",
-		sshPort,
+		"22",
 		binaryPath,
-		"root@localhost:/usr/local/bin/edgectl",
+		fmt.Sprintf("ubuntu@%s:/home/ubuntu/edgectl", ipAddress),
 	)
 	if output, err := scmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to copy edgectl binary to container: %v\nOutput: %s", err, output)
+		t.Fatalf("Failed to copy edgectl binary to vm: %v\nOutput: %s", err, output)
 	}
 
-	// Run edgectl bootstrap --help inside the container
+	// TODO:This is wrong!!! edgectl must be run from the local machine and target the target virtual machine. Wtf is this
 	sshCmd := exec.Command(
 		"ssh",
 		"-i",
-		privateKeyPath,
+		sshKeyPath,
 		"-o",
 		"StrictHostKeyChecking=no",
 		"-o",
 		"UserKnownHostsFile=/dev/null",
 		"-p",
-		sshPort,
-		"root@localhost",
-		"/usr/local/bin/edgectl bootstrap --help",
+		"22",
+		fmt.Sprintf("ubuntu@%s", ipAddress),
+		"/home/ubuntu/edgectl bootstrap --target "+ipAddress+" --user ubuntu --key "+sshKeyPath+" --config-repo https://github.com/alexandremahdhaoui/edge-cd-config.git --edge-cd-repo https://github.com/alexandremahdhaoui/edge-cd.git --packages git,curl --service-manager systemd",
 	)
 	output, err := sshCmd.CombinedOutput()
 	// Assert the command exits with code 0 (no error)
 	if err != nil {
-		t.Fatalf("edgectl bootstrap --help command failed: %v\nOutput: %s", err, output)
+		t.Fatalf("edgectl bootstrap command failed: %v\nOutput: %s", err, output)
 	}
 
-	// Assert the help message is printed (check for a known string)
-	expectedOutputPart := "Usage of /usr/local/bin/edgectl bootstrap:"
-	if !strings.Contains(string(output), expectedOutputPart) {
-		t.Errorf("Expected output to contain %q, but got:\n%s", expectedOutputPart, string(output))
+	// Check packages
+	_, _, err = sshClient.Run("dpkg -s git && dpkg -s curl")
+	if err != nil {
+		t.Errorf("git and curl not installed: %v", err)
 	}
-	t.Log("edgectl bootstrap --help command verified.")
+
+	// Check repos
+	_, _, err = sshClient.Run("[ -d /opt/edge-cd/.git ]")
+	if err != nil {
+		t.Errorf("edge-cd repo not found: %v", err)
+	}
+
+	_, _, err = sshClient.Run("[ -d /opt/user-config/.git ]")
+	if err != nil {
+		t.Errorf("user-config repo not found: %v", err)
+	}
+
+	// Check config file
+	_, _, err = sshClient.Run("[ -f /etc/edge-cd/config.yaml ]")
+	if err != nil {
+		t.Errorf("config.yaml not found: %v", err)
+	}
+
+	// Check service file
+	_, _, err = sshClient.Run("[ -f /etc/systemd/system/edge-cd.service ]")
+	if err != nil {
+		t.Errorf("edge-cd.service not found: %v", err)
+	}
+
+	// Check service status
+	_, _, err = sshClient.Run("systemctl is-enabled edge-cd.service")
+	if err != nil {
+		t.Errorf("edge-cd.service not enabled: %v", err)
+	}
+
+	_, _, err = sshClient.Run("systemctl is-active edge-cd.service")
+	if err != nil {
+		t.Errorf("edge-cd.service not active: %v", err)
+	}
 }
 
-func TestE2EProvisionPackages(t *testing.T) {
-	preTestCleanup(t)
-	// Build the edgectl binary (not strictly needed for this test, but good practice)
-	_ = buildEdgectlHelper(t)
-
-	// Get host's SSH public key and private key path
-	privateKeyPath, sshPublicKey := getOrCreateSSHKeyPair(t)
-
-	// Build the e2e target image with SSH public key
-	buildCmd := exec.Command(
-		"docker",
-		"build",
-		"-t",
-		e2eTargetImage,
-		"--build-arg",
-		"SSH_PUBLIC_KEY="+sshPublicKey,
-		"./testdata",
-	)
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to build Docker image %s: %v\nOutput: %s", e2eTargetImage, err, output)
+// getSSHPublicKey reads the public key from the given private key path.
+func getSSHPublicKey(privateKeyPath string) (string, error) {
+	// For now, assume id_rsa.pub exists next to id_rsa
+	publicKeyPath := privateKeyPath + ".pub"
+	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("SSH public key not found at %s", publicKeyPath)
 	}
 
-	// Start the Docker container
-	containerID, err := startContainerHelper(t)
+	publicKeyBytes, err := ioutil.ReadFile(publicKeyPath)
 	if err != nil {
-		t.Fatalf("Failed to start container: %v", err)
+		return "", fmt.Errorf("failed to read SSH public key: %w", err)
 	}
 
-	// Ensure cleanup happens
-	t.Cleanup(func() {
-		if containerID != "" {
-			stopContainerHelper(t, containerID)
-			cleanupContainerHelper(t, containerID)
-		}
-	})
-
-	// Create SSH client
-	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, "", sshPort)
-	if err != nil {
-		t.Fatalf("Failed to create SSH client: %v", err)
-	}
-
-	packagesToInstall := []string{"git"}
-
-	// Run package installation for the first time
-	t.Logf("Installing packages: %v (first run)", packagesToInstall)
-	if err := provision.InstallPackages(sshClient, packagesToInstall); err != nil {
-		t.Fatalf("First package installation failed: %v", err)
-	}
-
-	// Verify package is installed
-	checkCmd := fmt.Sprintf("dpkg -s %s &> /dev/null", packagesToInstall[0])
-	_, _, err = sshClient.Run(checkCmd)
-	if err != nil {
-		t.Errorf("Package %s not found after first installation: %v", packagesToInstall[0], err)
-	}
-
-	// Run package installation again (test idempotency)
-	t.Logf("Installing packages: %v (second run - idempotency test)", packagesToInstall)
-	if err := provision.InstallPackages(sshClient, packagesToInstall); err != nil {
-		t.Fatalf("Second package installation (idempotency test) failed: %v", err)
-	}
-
-	// Verify package is still installed after idempotent run
-	_, _, err = sshClient.Run(checkCmd)
-	if err != nil {
-		t.Errorf("Package %s not found after second installation: %v", packagesToInstall[0], err)
-	}
-
-	t.Log("E2E package provisioning test passed.")
+	return strings.TrimSpace(string(publicKeyBytes)), nil
 }
 
-func TestE2ECloneEdgeCDRepo(t *testing.T) {
-	preTestCleanup(t)
+// buildEdgectlHelper builds the edgectl binary and returns its path.
+// It creates a temporary directory for the binary and cleans it up after the test.
+func buildEdgectlHelper(t *testing.T) string {
+	t.Helper()
 
-	// Build the edgectl binary (not strictly needed for this test, but good practice)
-	_ = buildEdgectlHelper(t)
-
-	// Get host's SSH public key and private key path
-	privateKeyPath, sshPublicKey := getOrCreateSSHKeyPair(t)
-
-	// Build the e2e target image with SSH public key
-	buildCmd := exec.Command(
-		"docker",
-		"build",
-		"-t",
-		e2eTargetImage,
-		"--build-arg",
-		"SSH_PUBLIC_KEY="+sshPublicKey,
-		"./testdata",
-	)
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to build Docker image %s: %v\nOutput: %s", e2eTargetImage, err, output)
-	}
-
-	// Start the Docker container
-	containerID, err := startContainerHelper(t)
+	// Create a temporary directory for the built binary
+	tmpDir, err := os.MkdirTemp("", "edgectl-build-")
 	if err != nil {
-		t.Fatalf("Failed to start container: %v", err)
+		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-
-	// Ensure cleanup happens
 	t.Cleanup(func() {
-		if containerID != "" {
-			stopContainerHelper(t, containerID)
-			cleanupContainerHelper(t, containerID)
-		}
+		os.RemoveAll(tmpDir)
 	})
 
-	// Create SSH client
-	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, "", sshPort)
-	if err != nil {
-		t.Fatalf("Failed to create SSH client: %v", err)
+	binaryPath := filepath.Join(tmpDir, "edgectl")
+	cmd := exec.Command("go", "build", "-o", binaryPath, "../../../cmd/edgectl")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to build edgectl binary: %v", err)
 	}
 
-	// Install git package (required for cloning)
-	packagesToInstall := []string{"git"}
-	t.Logf("Installing packages: %v (for cloning)", packagesToInstall)
-	if err := provision.InstallPackages(sshClient, packagesToInstall); err != nil {
-		t.Fatalf("Failed to install git for cloning: %v", err)
-	}
-
-	edgeCDRepoURL := "https://github.com/alexandremahdhaoui/edge-cd.git"
-	edgeCDDestPath := "/opt/edge-cd"
-
-	// Run repository cloning for the first time
-	t.Logf("Cloning edge-cd repository (first run)")
-	if err := provision.CloneOrPullRepo(sshClient, edgeCDRepoURL, edgeCDDestPath); err != nil {
-		t.Fatalf("First edge-cd repository cloning failed: %v", err)
-	}
-
-	// Verify repository exists
-	checkCmd := fmt.Sprintf("[ -d %s/.git ]", edgeCDDestPath)
-	_, _, err = sshClient.Run(checkCmd)
-	if err != nil {
-		t.Errorf("Edge-cd repository not found after first cloning: %v", err)
-	}
-
-	// Run repository cloning again (test idempotency)
-	t.Logf("Cloning edge-cd repository (second run - idempotency test)")
-	if err := provision.CloneOrPullRepo(sshClient, edgeCDRepoURL, edgeCDDestPath); err != nil {
-		t.Fatalf("Second edge-cd repository cloning (idempotency test) failed: %v", err)
-	}
-
-	// Verify repository still exists after idempotent run
-	_, _, err = sshClient.Run(checkCmd)
-	if err != nil {
-		t.Errorf("Edge-cd repository not found after second cloning: %v", err)
-	}
-
-	t.Log("E2E edge-cd repository cloning test passed.")
-}
-
-func TestE2ECloneUserConfigRepo(t *testing.T) {
-	preTestCleanup(t)
-
-	// Build the edgectl binary (not strictly needed for this test, but good practice)
-	_ = buildEdgectlHelper(t)
-
-	// Get host's SSH public key and private key path
-	privateKeyPath, sshPublicKey := getOrCreateSSHKeyPair(t)
-
-	// Build the e2e target image with SSH public key
-	buildCmd := exec.Command(
-		"docker",
-		"build",
-		"-t",
-		e2eTargetImage,
-		"--build-arg",
-		"SSH_PUBLIC_KEY="+sshPublicKey,
-		"./testdata",
-	)
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to build Docker image %s: %v\nOutput: %s", e2eTargetImage, err, output)
-	}
-
-	// Start the Docker container
-	containerID, err := startContainerHelper(t)
-	if err != nil {
-		t.Fatalf("Failed to start container: %v", err)
-	}
-
-	// Ensure cleanup happens
-	t.Cleanup(func() {
-		if containerID != "" {
-			stopContainerHelper(t, containerID)
-			cleanupContainerHelper(t, containerID)
-		}
-	})
-
-	// Create SSH client
-	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, "", sshPort)
-	if err != nil {
-		t.Fatalf("Failed to create SSH client: %v", err)
-	}
-
-	// Install git package (required for cloning)
-	packagesToInstall := []string{"git"}
-	t.Logf("Installing packages: %v (for cloning)", packagesToInstall)
-	if err := provision.InstallPackages(sshClient, packagesToInstall); err != nil {
-		t.Fatalf("Failed to install git for cloning: %v", err)
-	}
-
-	userConfigRepoURL := "https://github.com/alexandremahdhaoui/edge-cd.git"
-	userConfigDestPath := "/opt/user-config"
-
-	// Run repository cloning for the first time
-	t.Logf("Cloning user config repository (first run)")
-	if err := provision.CloneOrPullRepo(sshClient, userConfigRepoURL, userConfigDestPath); err != nil {
-		t.Fatalf("First user config repository cloning failed: %v", err)
-	}
-
-	// Verify repository exists
-	checkCmd := fmt.Sprintf("[ -d %s/.git ]", userConfigDestPath)
-	_, _, err = sshClient.Run(checkCmd)
-	if err != nil {
-		t.Errorf("User config repository not found after first cloning: %v", err)
-	}
-
-	// Run repository cloning again (test idempotency)
-	t.Logf("Cloning user config repository (second run - idempotency test)")
-	if err := provision.CloneOrPullRepo(sshClient, userConfigRepoURL, userConfigDestPath); err != nil {
-		t.Fatalf("Second user config repository cloning (idempotency test) failed: %v", err)
-	}
-
-	// Verify repository still exists after idempotent run
-	_, _, err = sshClient.Run(checkCmd)
-	if err != nil {
-		t.Errorf("User config repository not found after second cloning: %v", err)
-	}
-
-	t.Log("E2E user config repository cloning test passed.")
-}
-
-func TestE2ESetupEdgeCDService(t *testing.T) {
-	preTestCleanup(t)
-
-	// Build the edgectl binary (not strictly needed for this test, but good practice)
-	_ = buildEdgectlHelper(t)
-
-	// Get host's SSH public key and private key path
-	privateKeyPath, sshPublicKey := getOrCreateSSHKeyPair(t)
-
-	// Build the e2e target image with SSH public key
-	buildCmd := exec.Command(
-		"docker",
-		"build",
-		"-t",
-		e2eTargetImage,
-		"--build-arg",
-		"SSH_PUBLIC_KEY="+sshPublicKey,
-		"./testdata",
-	)
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to build Docker image %s: %v\nOutput: %s", e2eTargetImage, err, output)
-	}
-
-	// Start the Docker container
-	containerID, err := startContainerHelper(t)
-	if err != nil {
-		t.Fatalf("Failed to start container: %v", err)
-	}
-
-	// Ensure cleanup happens
-	t.Cleanup(func() {
-		if containerID != "" {
-			stopContainerHelper(t, containerID)
-			cleanupContainerHelper(t, containerID)
-		}
-	})
-
-	// Create SSH client
-	sshClient, err := ssh.NewClient("localhost", "root", privateKeyPath, "", sshPort)
-	if err != nil {
-		t.Fatalf("Failed to create SSH client: %v", err)
-	}
-
-	// Install git package (required for cloning)
-	packagesToInstall := []string{"git"}
-	t.Logf("Installing packages: %v (for cloning)", packagesToInstall)
-	if err := provision.InstallPackages(sshClient, packagesToInstall); err != nil {
-		t.Fatalf("Failed to install git for cloning: %v", err)
-	}
-
-	edgeCDRepoURL := "https://github.com/alexandremahdhaoui/edge-cd.git"
-	edgeCDRepoPath := "/opt/edge-cd"
-
-	// Clone edge-cd repository
-	t.Logf("Cloning edge-cd repository to %s", edgeCDRepoPath)
-	if err := provision.CloneOrPullRepo(sshClient, edgeCDRepoURL, edgeCDRepoPath); err != nil {
-		t.Fatalf("Failed to clone edge-cd repository: %v", err)
-	}
-
-	// Setup edge-cd service (systemd)
-	serviceManagerName := "systemd"
-	t.Logf("Setting up edge-cd service with %s", serviceManagerName)
-	if err := provision.SetupEdgeCDService(sshClient, serviceManagerName, edgeCDRepoPath); err != nil {
-		t.Fatalf("Failed to setup edge-cd service: %v", err)
-	}
-
-	// Verify service is enabled and active
-	checkEnabledCmd := "systemctl is-enabled edge-cd.service"
-	checkActiveCmd := "systemctl is-active edge-cd.service"
-
-	_, _, err = sshClient.Run(checkEnabledCmd)
-	if err != nil {
-		t.Errorf("Edge-cd service is not enabled: %v", err)
-	}
-
-	_, _, err = sshClient.Run(checkActiveCmd)
-	if err != nil {
-		t.Errorf("Edge-cd service is not active: %v", err)
-	}
-
-	// Test idempotency
-	t.Logf("Setting up edge-cd service again (idempotency test)")
-	if err := provision.SetupEdgeCDService(sshClient, serviceManagerName, edgeCDRepoPath); err != nil {
-		t.Fatalf("Idempotency test for edge-cd service failed: %v", err)
-	}
-
-	// Verify service is still enabled and active after idempotent run
-	_, _, err = sshClient.Run(checkEnabledCmd)
-	if err != nil {
-		t.Errorf("Edge-cd service is not enabled after idempotent run: %v", err)
-	}
-
-	_, _, err = sshClient.Run(checkActiveCmd)
-	if err != nil {
-		t.Errorf("Edge-cd service is not active after idempotent run: %v", err)
-	}
-
-	t.Log("E2E edge-cd service setup test passed.")
+	return binaryPath
 }

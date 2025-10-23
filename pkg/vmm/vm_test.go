@@ -1,4 +1,4 @@
-package e2e
+package vmm_test
 
 import (
 	"fmt"
@@ -13,6 +13,7 @@ import (
 	"libvirt.org/go/libvirt"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 )
 
 func TestVMLifecycle(t *testing.T) {
@@ -91,24 +92,24 @@ users:
       - %q
 `, vmName, sshPublicKey)
 
-	cfg := NewVMConfig(vmName, imageCachePath, sshKeyPath)
+	cfg := vmm.NewVMConfig(vmName, imageCachePath, sshKeyPath)
 	cfg.UserData = userData
 
 	t.Logf("[INFO] Creating VM with config %+v", cfg)
 	// --- Test VM Lifecycle ---
-	conn, dom, err := CreateVM(cfg)
+	conn, dom, err := vmm.CreateVM(cfg)
 	if err != nil {
 		t.Fatalf("Failed to create VM: %v", err)
 	}
 	defer func() {
-		if err := DestroyVM(conn, dom); err != nil {
+		if err := vmm.DestroyVM(conn, dom); err != nil {
 			t.Errorf("Failed to destroy VM: %v", err)
 		}
 	}()
 
 	t.Log("[INFO] Retrieving VM IP Adrr...")
 	var ipAddress string
-	ipAddress, err = GetVMIPAddress(conn, dom)
+	ipAddress, err = vmm.GetVMIPAddress(conn, dom)
 
 	if err != nil || ipAddress == "" {
 		t.Fatalf("Failed to get VM IP address: %v", err)
@@ -116,7 +117,7 @@ users:
 	t.Logf("VM %s has IP: %s", vmName, ipAddress)
 
 	// Get and log serial console output
-	consoleOutput, err := getConsoleOutput(conn, dom)
+	consoleOutput, err := vmm.GetConsoleOutput(conn, dom)
 	if err != nil {
 		t.Logf("Failed to get console output: %v", err)
 	} else {
@@ -143,7 +144,7 @@ users:
 			)
 
 		case <-sshTick.C:
-			sshClient, sshErr = ssh.NewClient(ipAddress, "ubuntu", cfg.SSHKeyPath, "1234", "22")
+			sshClient, sshErr = ssh.NewClient(ipAddress, "ubuntu", cfg.SSHKeyPath, "22")
 			if sshErr != nil {
 				t.Logf("SSH connection failed: %v, retrying...", sshErr)
 				continue

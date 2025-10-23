@@ -15,12 +15,11 @@ type Client struct {
 	Host       string
 	User       string
 	PrivateKey []byte
-	Password   string
 	Port       string
 }
 
 // NewClient creates a new SSH client.
-func NewClient(host, user, privateKeyPath, password, port string) (*Client, error) {
+func NewClient(host, user, privateKeyPath, port string) (*Client, error) {
 	key, err := ioutil.ReadFile(privateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read private key: %w", err)
@@ -30,7 +29,6 @@ func NewClient(host, user, privateKeyPath, password, port string) (*Client, erro
 			Host:       host,
 			User:       user,
 			PrivateKey: key,
-			Password:   password,
 			Port:       port,
 		},
 		nil
@@ -47,7 +45,6 @@ func (c *Client) Run(cmd string) (stdout, stderr string, err error) {
 		User: c.User,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
-			ssh.Password(c.Password),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For testing, ignore host key verification
 		Timeout:         10 * time.Second,
@@ -75,4 +72,39 @@ func (c *Client) Run(cmd string) (stdout, stderr string, err error) {
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), nil
+}
+
+// AwaitAvailability waits for the SSH server to be available.
+func (c *Client) AwaitServer(timeout time.Duration) error {
+	signer, err := ssh.ParsePrivateKey(c.PrivateKey)
+	if err != nil {
+		return fmt.Errorf("unable to parse private key: %w", err)
+	}
+
+	config := &ssh.ClientConfig{
+		User: c.User,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For testing, ignore host key verification
+		Timeout:         5 * time.Second,             // Shorter timeout for each attempt
+	}
+
+	addr := net.JoinHostPort(c.Host, c.Port)
+	timeoutChan := time.After(timeout)
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+
+	for {
+		select {
+		case <-timeoutChan:
+			return fmt.Errorf("timed out waiting for SSH server at %s", addr)
+		case <-tick.C:
+			conn, err := ssh.Dial("tcp", addr, config)
+			if err == nil {
+				conn.Close()
+				return nil // SSH server is available
+			}
+		}
+	}
 }
