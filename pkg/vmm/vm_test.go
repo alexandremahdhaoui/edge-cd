@@ -9,25 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"libvirt.org/go/libvirt"
-
 	"github.com/alexandremahdhaoui/edge-cd/pkg/cloudinit"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 )
 
-func TestVMLifecycle(t *testing.T) {
+func TestVMMStructLifecycle(t *testing.T) {
 	// Skip test if libvirt is not available or if running in CI without KVM
 	if os.Getenv("CI") == "true" && os.Getenv("LIBVIRT_TEST") != "true" {
 		t.Skip("Skipping libvirt VM lifecycle test in CI without LIBVIRT_TEST=true")
 	}
-
-	// Ensure libvirt connection is possible (basic check)
-	conn, err := libvirt.NewConnect("qemu:///system")
-	if err != nil {
-		t.Skipf("Skipping libvirt VM lifecycle test: failed to connect to libvirt: %v", err)
-	}
-	conn.Close()
 
 	// --- Configuration ---
 
@@ -75,14 +66,50 @@ func TestVMLifecycle(t *testing.T) {
 	}
 
 	// -- Generate user data with VM's SSH public key
-	targetUser, err := cloudinit.NewUser("ubuntu", sshKeyPath)
+	publicKeyBytes, err := os.ReadFile(sshKeyPath + ".pub")
 	if err != nil {
 		t.Fatal(err.Error())
 	}
+	targetUser := cloudinit.NewUserWithAuthorizedKeys("ubuntu", []string{string(publicKeyBytes)})
+
 	userData := cloudinit.UserData{
-		Hostname:      "",
+		Hostname:      vmName,
+		PackageUpdate: true,
+		Packages:      []string{"qemu-guest-agent"},
 		Users:         []cloudinit.User{targetUser},
-		SSHDeleteKeys: false,
+		WriteFiles: []cloudinit.WriteFile{
+			{
+				Path:        "/etc/systemd/system/mnt-virtiofs.mount",
+				Permissions: "0644",
+				Content: `[Unit]
+Description=VirtioFS Mount
+After=network-online.target
+
+[Service]
+Restart=always
+
+[Mount]
+What=virtiofs_share
+Where=/mnt/virtiofs
+Type=virtiofs
+Options=defaults,nofail
+
+[Install]
+WantedBy=multi-user.target`,
+			},
+		},
+		RunCommands: []string{
+			"mkdir -p /mnt/virtiofs",
+		},
+	}
+
+	// Define virtiofs share for the VM
+	virtiofsSharePath := filepath.Join(tempDir, "virtiofs_share")
+	if err := os.MkdirAll(virtiofsSharePath, 0o755); err != nil {
+		t.Fatalf("Failed to create virtiofs share directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(virtiofsSharePath, "host_file.txt"), []byte("Hello from host!"), 0o644); err != nil {
+		t.Fatalf("Failed to write host_file.txt: %v", err)
 	}
 
 	// -- create new vm config
@@ -91,22 +118,34 @@ func TestVMLifecycle(t *testing.T) {
 		imageCachePath,
 		userData,
 	)
+	cfg.VirtioFS = []vmm.VirtioFSConfig{
+		{
+			Tag:        "virtiofs_share", // Changed to match cloud-init mount tag
+			MountPoint: virtiofsSharePath,
+		},
+	}
+
+	vmmInstance, err := vmm.NewVMM()
+	if err != nil {
+		t.Fatalf("Failed to create VMM instance: %v", err)
+	}
+	defer vmmInstance.Close()
 
 	t.Logf("[INFO] Creating VM with config %+v", cfg)
 	// --- Test VM Lifecycle ---
-	conn, dom, err := vmm.CreateVM(cfg)
+	_, err = vmmInstance.CreateVM(cfg)
 	if err != nil {
 		t.Fatalf("Failed to create VM: %v", err)
 	}
 	defer func() {
-		if err := vmm.DestroyVM(conn, dom); err != nil {
+		if err := vmmInstance.DestroyVM(vmName); err != nil {
 			t.Errorf("Failed to destroy VM: %v", err)
 		}
 	}()
 
 	t.Log("[INFO] Retrieving VM IP Adrr...")
 	var ipAddress string
-	ipAddress, err = vmm.GetVMIPAddress(conn, dom)
+	ipAddress, err = vmmInstance.GetVMIPAddress(vmName)
 
 	if err != nil || ipAddress == "" {
 		t.Fatalf("Failed to get VM IP address: %v", err)
@@ -114,7 +153,7 @@ func TestVMLifecycle(t *testing.T) {
 	t.Logf("VM %s has IP: %s", vmName, ipAddress)
 
 	// Get and log serial console output
-	consoleOutput, err := vmm.GetConsoleOutput(conn, dom)
+	consoleOutput, err := vmmInstance.GetConsoleOutput(vmName)
 	if err != nil {
 		t.Logf("Failed to get console output: %v", err)
 	} else {
@@ -126,8 +165,8 @@ func TestVMLifecycle(t *testing.T) {
 	var stdout, stderr string
 	var sshErr error
 
-	sshTimeout := time.After(30 * time.Second)
-	sshTick := time.NewTicker(3 * time.Second)
+	sshTimeout := time.After(60 * time.Second) // Increased timeout for VM startup
+	sshTick := time.NewTicker(5 * time.Second)
 	defer sshTick.Stop()
 
 	for {
@@ -147,20 +186,45 @@ func TestVMLifecycle(t *testing.T) {
 				continue
 			}
 
+			// Verify basic SSH connectivity
 			stdout, stderr, sshErr = sshClient.Run("echo hello")
-			if sshErr == nil {
-				if strings.TrimSpace(stdout) == "hello" {
-					t.Log("VM lifecycle and basic SSH connectivity test passed.")
-					return // Test passed
-				}
+			if sshErr != nil || strings.TrimSpace(stdout) != "hello" {
 				t.Logf(
-					"Unexpected SSH command output: got %q, want %q, retrying...",
-					strings.TrimSpace(stdout),
-					"hello",
+					"Failed to run basic command on VM via SSH: %v\nStdout: %s\nStderr: %s, retrying...",
+					sshErr,
+					stdout,
+					stderr,
+				)
+				continue
+			}
+			t.Log("VM lifecycle and basic SSH connectivity test passed.")
+
+			stdout, stderr, sshErr = sshClient.Run("sudo systemctl enable --now mnt-virtiofs.mount")
+			if sshErr != nil {
+				t.Logf(
+					"Error running 'sudo systemctl enable --now mnt-virtiofs.mount' on VM: %v\nStdout: %s\nStderr: %s",
+					sshErr,
+					stdout,
+					stderr,
 				)
 			} else {
-				t.Logf("Failed to run command on VM via SSH: %v\nStdout: %s\nStderr: %s, retrying...", sshErr, stdout, stderr)
+				t.Logf("VM 'systemctl status mnt-virtiofs.mount' output:\n%s", stdout)
 			}
+
+			// Verify virtiofs mount
+			stdout, stderr, sshErr = sshClient.Run("ls /mnt/virtiofs/host_file.txt")
+			if sshErr != nil || !strings.Contains(stdout, "host_file.txt") {
+				t.Errorf(
+					"VirtioFS mount not working or host_file.txt not found: %v\nStdout: %s\nStderr: %s",
+					sshErr,
+					stdout,
+					stderr,
+				)
+			} else {
+				t.Log("VirtioFS mount verified.")
+			}
+
+			return // Test passed
 		}
 	}
 }
@@ -180,3 +244,4 @@ func getSSHPublicKey(privateKeyPath string) (string, error) {
 
 	return strings.TrimSpace(string(publicKeyBytes)), nil
 }
+

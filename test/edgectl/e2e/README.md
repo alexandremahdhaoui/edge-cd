@@ -22,6 +22,13 @@ sudo apt-get update
 sudo apt-get install xorriso # genisoimage
 ```
 
+##### others
+
+```bash
+sudo apt install libcap-ng-dev libseccomp-dev
+cargo install virtiofsd
+```
+
 ### Virsh debugging
 
 ```bash
@@ -41,10 +48,10 @@ virsh net-dhcp-release default
 
 # Or:
 {
-    for VM_NAME in $(virsh list | awk 'NR > 2 {print $2}' | xargs); do
+    for VM_NAME in $(virsh list --all | awk 'NR > 2 {print $2}' | xargs); do
         virsh destroy "${VM_NAME}"
-        virsh undefine --remove-all-storage "${VM_NAME}" 
         sudo rm -f "/tmp/${VM_NAME}*"
+        virsh undefine --remove-all-storage "${VM_NAME}" 
     done
 }
 ```

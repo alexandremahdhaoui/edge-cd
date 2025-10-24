@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,65 +15,79 @@ import (
 )
 
 func TestGitServerLifecycle(t *testing.T) {
-	// Create a temporary directory for the Git server's base directory
-	baseDir, err := ioutil.TempDir("", "gitserver-test-")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
+	// Skip test if libvirt is not available or if running in CI without KVM
+	if os.Getenv("CI") == "true" && os.Getenv("LIBVIRT_TEST") != "true" {
+		t.Skip("Skipping libvirt Git server lifecycle test in CI without LIBVIRT_TEST=true")
 	}
-	defer os.RemoveAll(baseDir)
 
-	// Generate a dummy host SSH key for the Git server's SSH client
-	hostKeyPath := filepath.Join(baseDir, "id_rsa_host")
-	cmd := exec.Command("ssh-keygen", "-t", "rsa", "-b", "2048", "-f", hostKeyPath, "-N", "")
+	// Create a temporary directory for the Git server's base directory and VM artifacts
+	tempDir := t.TempDir()
+
+	// Download image if not exists
+	cacheDir := filepath.Join(os.TempDir(), "edgectl")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatalf("failed to create cache directory for vm image %q", cacheDir)
+	}
+	imageName := "ubuntu-24.04-server-cloudimg-amd64.img"
+	imageURL := "https://cloud-images.ubuntu.com/releases/noble/release/" + imageName
+	imageCachePath := filepath.Join(cacheDir, imageName)
+
+	if _, err := os.Stat(imageCachePath); os.IsNotExist(err) {
+		t.Logf("Downloading VM image from %s to %s...", imageURL, imageCachePath)
+		cmd := exec.Command(
+			"wget",
+			"--progress=dot",
+			"-e", "dotbytes=3M",
+			"-O", imageCachePath,
+			imageURL,
+		)
+
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("Failed to download VM image: %v", err)
+		}
+	}
+
+	server := gitserver.NewServer(tempDir, imageCachePath, []gitserver.Repo{})
+
+	// Generate a dummy host SSH key for the test client to connect to the Git server VM
+	cmd := exec.Command("ssh-keygen", "-t", "rsa", "-b", "2048", "-f", server.HostKeyPath, "-N", "")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to generate host SSH key pair: %v\nOutput: %s", err, output)
+		t.Fatalf("Failed to generate host SSH key pair for client: %v\nOutput: %s", err, output)
 	}
-	if err := os.Chmod(hostKeyPath, 0o600); err != nil {
-		t.Fatalf("Failed to set permissions on host SSH private key: %v", err)
-	}
-
-	// Generate a dummy authorized key for the Git server
-	authorizedKeyPath := filepath.Join(baseDir, "id_rsa_authorized.pub")
-	cmd = exec.Command("ssh-keygen", "-t", "rsa", "-b", "2048", "-f", filepath.Join(baseDir, "id_rsa_authorized"), "-N", "")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to generate authorized SSH key pair: %v\nOutput: %s", err, output)
-	}
-	authorizedKeyBytes, err := ioutil.ReadFile(authorizedKeyPath)
-	if err != nil {
-		t.Fatalf("Failed to read authorized public key: %v", err)
-	}
-	authorizedKey := string(authorizedKeyBytes)
-
-	server := gitserver.Server{
-		ServerAddr:     "localhost",
-		SSHPort:        2222, // Use a non-standard port to avoid conflicts
-		HostKeyPath:    hostKeyPath,
-		AuthorizedKeys: []string{authorizedKey},
-		BaseDir:        baseDir,
-		Repo:           []gitserver.Repo{}, // No repos to init for this test
+	if err := os.Chmod(server.HostKeyPath, 0o600); err != nil {
+		t.Fatalf("Failed to set permissions on client SSH private key: %v", err)
 	}
 
-	t.Log("Running Git server...")
+	t.Log("Running Git server VM...")
 	if err := server.Run(); err != nil {
-		t.Fatalf("Failed to run Git server: %v", err)
+		t.Fatalf("Failed to run Git server VM: %v", err)
 	}
-	t.Log("Git server started successfully.")
+	t.Logf("Git server VM started successfully with IP: %s", server.GetVMIPAddress())
 
 	// Verify the server is running by attempting to connect via SSH
-	sshClient, err := ssh.NewClient("localhost", "git", hostKeyPath, fmt.Sprintf("%d", server.SSHPort))
+	sshClient, err := ssh.NewClient(server.GetVMIPAddress(), "git", server.HostKeyPath, fmt.Sprintf("%d", server.SSHPort))
 	if err != nil {
 		t.Fatalf("Failed to create SSH client: %v", err)
 	}
-	if err := sshClient.AwaitServer(10 * time.Second); err != nil {
-		t.Fatalf("Git server did not become ready in time: %v", err)
+	if err := sshClient.AwaitServer(60 * time.Second); err != nil { // Increased timeout for VM startup
+		t.Fatalf("Git server VM did not become ready in time: %v", err)
 	}
-	t.Log("SSH connection to Git server successful.")
+	t.Log("SSH connection to Git server VM successful.")
 
-	t.Log("Tearing down Git server...")
-	if err := server.Teardown(); err != nil {
-		t.Fatalf("Failed to teardown Git server: %v", err)
+	// Run a simple command to verify SSH connectivity
+	stdout, stderr, err := sshClient.Run("echo hello from client")
+	if err != nil || strings.TrimSpace(stdout) != "hello from client" {
+		t.Fatalf("Failed to run basic command on VM via SSH: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
 	}
-	t.Log("Git server torn down successfully.")
+	t.Log("Basic SSH command executed successfully.")
+
+	t.Log("Tearing down Git server VM...")
+	if err := server.Teardown(); err != nil {
+		t.Fatalf("Failed to teardown Git server VM: %v", err)
+	}
+	t.Log("Git server VM torn down successfully.")
 }
 
 func TestGitServerRepoInitAndPush(t *testing.T) {

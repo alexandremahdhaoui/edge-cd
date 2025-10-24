@@ -84,10 +84,12 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	}
 
 	// -- Generate user data with VM's SSH public key
-	targetUser, err := cloudinit.NewUser("ubuntu", hostSSHKeyPath+".pub")
+	publicKeyBytes, err := os.ReadFile(hostSSHKeyPath + ".pub")
 	if err != nil {
 		t.Fatal(err.Error())
 	}
+	targetUser := cloudinit.NewUserWithAuthorizedKeys("ubuntu", []string{string(publicKeyBytes)})
+
 	sshKeys, err := cloudinit.NewRSAKeyFromPrivateKeyFile(vmSSHKeyPath)
 	if err != nil {
 		t.Fatal(err.Error())
@@ -126,14 +128,6 @@ func TestE2EBootstrapCommand(t *testing.T) {
 		t.Fatalf("Failed to get VM IP address: %v", err)
 	}
 	t.Logf("VM %s has IP: %s", vmName, ipAddress)
-
-	// // Get and log serial console output
-	// consoleOutput, err := vmm.GetConsoleOutput(vmConn, dom)
-	// if err != nil {
-	//   t.Logf("Failed to get console output: %v", err)
-	// } else {
-	//   t.Logf("\n--- VM Console Output ---\n%s\n-------------------------", consoleOutput)
-	// }
 
 	// Wait for SSH to be ready
 	sshClient, err := ssh.NewClient(

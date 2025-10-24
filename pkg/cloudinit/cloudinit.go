@@ -8,22 +8,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// userData := fmt.Sprintf(`
-// #cloud-config
-// hostname: %s
-// users:
-//   - name: %s
-//     sudo: ALL=(ALL) NOPASSWD:ALL
-//     shell: /bin/bash
-//     ssh_authorized_keys:
-//       - %q
-// ssh_keys:
-//   rsa_private: |
-//     %s
-//   rsa_public: %q
-// ssh_deletekeys: false
-// `, vmName, targetUser, vmSSHPublicKey, readFileAndIndent(vmSSHKeyPath))
-
 type User struct {
 	Name              string   `json:"name"`
 	Sudo              string   `json:"sudo"`
@@ -50,14 +34,33 @@ func NewUser(name string, publicKeyPathList ...string) (User, error) {
 	}, nil
 }
 
+func NewUserWithAuthorizedKeys(name string, authorizedKeys []string) User {
+	return User{
+		Name:              name,
+		Sudo:              "ALL=(ALL) NOPASSWD:ALL",
+		Shell:             "/bin/bash",
+		SSHAuthorizedKeys: authorizedKeys,
+	}
+}
+
 type SSHKeys struct {
 	RSAPrivate string `json:"rsa_private"`
 	RSAPublic  string `json:"rsa_public"`
 }
 
+type WriteFile struct {
+	Path        string `json:"path"`
+	Permissions string `json:"permissions,omitempty"`
+	Content     string `json:"content"`
+}
+
 type UserData struct {
-	Hostname string `json:"hostname"`
-	Users    []User `json:"users"`
+	Hostname      string      `json:"hostname"`
+	PackageUpdate bool        `json:"package_update,omitempty"`
+	Packages      []string    `json:"packages,omitempty"`
+	Users         []User      `json:"users"`
+	WriteFiles    []WriteFile `json:"write_files,omitempty"`
+	RunCommands   []string    `json:"runcmd,omitempty"`
 }
 
 func (ud UserData) Render() (string, error) {
