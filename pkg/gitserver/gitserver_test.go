@@ -1,6 +1,7 @@
 package gitserver_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -129,7 +130,7 @@ func TestGitServerLifecycle(t *testing.T) {
 	server.AuthorizedKeys = append(server.AuthorizedKeys, string(publicKeyBytes))
 
 	t.Log("Running Git server VM...")
-	if err := server.Run(); err != nil {
+	if err := server.Run(context.Background()); err != nil {
 		t.Fatalf("Failed to run Git server VM: %v", err)
 	}
 	t.Logf("Git server VM started successfully with IP: %s", server.GetVMIPAddress())
@@ -212,7 +213,7 @@ func TestGitServerWithRepo(t *testing.T) {
 	server.AuthorizedKeys = append(server.AuthorizedKeys, string(publicKeyBytes))
 
 	t.Log("Running Git server VM with repo...")
-	if err := server.Run(); err != nil {
+	if err := server.Run(context.Background()); err != nil {
 		t.Fatalf("Failed to run Git server VM: %v", err)
 	}
 	t.Cleanup(func() {

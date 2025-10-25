@@ -1,6 +1,7 @@
 package gitserver
 
 import (
+	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -41,26 +42,27 @@ type Repo struct {
 }
 
 type Server struct {
-	name               string
-	ServerAddr         string
-	SSHPort            int
-	AuthorizedKeys     []string
-	BaseDir            string
-	Repo               []Repo
-	initPrivateKeyPath string
+	name           string
+	ServerAddr     string
+	SSHPort        int
+	AuthorizedKeys []string
+	BaseDir        string
+	Repo           []Repo
+	clientKeyPath  string
 
 	// -- VM related fields
 	vmm            *vmm.VMM
 	vmConfig       vmm.VMConfig
 	vmIPAddress    string
-	tempDir        string // Temporary directory for SSH keys and other temporary files
-	imageQCOW2Path string // Path to the base QCOW2 image for the VM
+	vmMetadata     *vmm.VMMetadata   // Metadata from CreateVM (for Status() method)
+	tempDir        string            // Temporary directory for SSH keys and other temporary files
+	imageQCOW2Path string            // Path to the base QCOW2 image for the VM
+	gitSSHUrls     map[string]string // Repository name -> SSH URL mapping
 
 	// -- Docker related fields (to be removed later)
 	authorizedKeysFile string
 	buildDir           string
 	gitDir             string
-	runningContainer   string
 }
 
 func NewServer(baseDir, imageQCOW2Path string, repo []Repo) *Server {
@@ -73,10 +75,25 @@ func NewServer(baseDir, imageQCOW2Path string, repo []Repo) *Server {
 		Repo:           repo,
 		tempDir:        baseDir,
 		imageQCOW2Path: imageQCOW2Path,
+		gitSSHUrls:     make(map[string]string),
 	}
 }
 
-func (s *Server) Run() error {
+// Run creates and starts the git server VM.
+// Accepts context for cancellation support.
+// After successful Run(), call Status() to get complete server information.
+func (s *Server) Run(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Initialize base directories first
+	if err := s.init(); err != nil {
+		return fmt.Errorf("failed to initialize directories: %v", err)
+	}
+
 	if err := s.initVM(); err != nil {
 		return fmt.Errorf("failed to initialize VM: %v", err)
 	}
@@ -87,13 +104,19 @@ func (s *Server) Run() error {
 		return fmt.Errorf("failed to create VMM: %v", err)
 	}
 
-	if _, err := s.vmm.CreateVM(s.vmConfig); err != nil {
+	// Create VM and get metadata
+	metadata, err := s.vmm.CreateVM(s.vmConfig)
+	if err != nil {
 		return fmt.Errorf("failed to create VM: %v", err)
 	}
 
-	s.vmIPAddress, err = s.vmm.GetVMIPAddress(s.vmConfig.Name)
-	if err != nil {
-		return fmt.Errorf("failed to get VM IP address: %v", err)
+	// Store metadata for Status() method
+	s.vmMetadata = metadata
+
+	// Use metadata from CreateVM
+	s.vmIPAddress = metadata.IP
+	if s.vmIPAddress == "" {
+		return fmt.Errorf("VM created but IP address not available")
 	}
 	s.ServerAddr = s.vmIPAddress
 
@@ -110,10 +133,44 @@ func (s *Server) Run() error {
 			if err := s.initAndPushRepo(sshClient, repo.Name, repo.Source.LocalPath); err != nil {
 				return fmt.Errorf("failed to init and push repo %s: %w", repo.Name, err)
 			}
+
+			// Build GitSSHURLs as repos are created
+			// Format: ssh://git@<IP>:<port>/srv/git/<repoName>.git
+			repoURL := fmt.Sprintf(
+				"ssh://git@%s:%d/srv/git/%s.git",
+				s.vmIPAddress,
+				s.SSHPort,
+				repo.Name,
+			)
+			s.gitSSHUrls[repo.Name] = repoURL
+		}
+	}
+
+	// Set git-shell after repos are initialized (if we have repos)
+	if len(s.Repo) > 0 {
+		sshClient, err := s.sshClient()
+		if err == nil {
+			sshClient.Run("chsh -s /usr/bin/git-shell git")
 		}
 	}
 
 	return nil
+}
+
+// Status returns complete information about the git server.
+// This is the ONLY public method to query server state.
+// Returns nil if the server has not been successfully started (Run() not called).
+func (s *Server) Status() *Status {
+	if s.vmMetadata == nil {
+		return nil
+	}
+
+	return &Status{
+		VMMetadata:  s.vmMetadata,
+		BaseDir:     s.BaseDir,
+		GitSSHURLs:  s.gitSSHUrls,
+		ServicePort: s.SSHPort,
+	}
 }
 
 func (s *Server) init() error {
@@ -144,9 +201,9 @@ func (s *Server) init() error {
 
 // initVM prepares the vmm.VMConfig and cloudinit.UserData for the Git server VM.
 func (s *Server) initVM() error {
-	// 1. Generate a new SSH key pair for the Git server VM
-	s.initPrivateKeyPath = filepath.Join(s.tempDir, "id_rsa_gitserver")
-	sshPublicKeyPath := s.initPrivateKeyPath + ".pub"
+	// 1. Generate a new SSH key pair to ssh to the vm and push specified repo
+	s.clientKeyPath = filepath.Join(s.tempDir, "id_rsa_gitserver")
+	clientPublicKeyPath := s.clientKeyPath + ".pub"
 
 	cmd := exec.Command(
 		"ssh-keygen",
@@ -155,7 +212,7 @@ func (s *Server) initVM() error {
 		"-b",
 		"2048",
 		"-f",
-		s.initPrivateKeyPath,
+		s.clientKeyPath,
 		"-N",
 		"",
 	)
@@ -166,19 +223,22 @@ func (s *Server) initVM() error {
 			output,
 		)
 	}
-	if err := os.Chmod(s.initPrivateKeyPath, 0o600); err != nil {
+	if err := os.Chmod(s.clientKeyPath, 0o600); err != nil {
 		return fmt.Errorf("failed to set permissions on Git server VM SSH private key: %v", err)
 	}
 
 	// 2. Configure cloud-init UserData
-	publicKeyBytes, err := os.ReadFile(sshPublicKeyPath)
+	clientPublicKey, err := os.ReadFile(clientPublicKeyPath)
 	if err != nil {
 		return fmt.Errorf("failed to read Git server VM SSH public key: %w", err)
 	}
 
-	authorizedKeys := append(s.AuthorizedKeys, strings.TrimSpace(string(publicKeyBytes)))
-
-	gitUser := cloudinit.NewUserWithAuthorizedKeys("git", authorizedKeys)
+	// Create a git user without using cloud-init's authorized_keys
+	// (since we have a custom home directory at /srv/git)
+	gitUser := cloudinit.NewUserWithAuthorizedKeys(
+		"git",
+		append(s.AuthorizedKeys, strings.TrimSpace(string(clientPublicKey))),
+	)
 	gitUser.HomeDir = "/srv/git"
 
 	userData := cloudinit.UserData{
@@ -186,10 +246,8 @@ func (s *Server) initVM() error {
 		PackageUpdate: true,
 		Packages:      []string{"git", "openssh-server", "qemu-guest-agent"},
 		Users:         []cloudinit.User{gitUser},
+		WriteFiles:    []cloudinit.WriteFile{},
 		RunCommands: []string{
-			"mkdir -p /srv/git",
-			"chown -R git:git /srv/git",
-			"chmod -R 755 /srv/git",
 			"sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config",
 			"sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config",
 			"sed -i 's/^#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config",
@@ -211,7 +269,9 @@ func (s *Server) Teardown() error {
 	}
 
 	var errs error
-	if err := s.vmm.DestroyVM(s.vmConfig.Name); err != nil {
+	// Use background context for teardown (not critical if cancellation happens)
+	ctx := context.Background()
+	if err := s.vmm.DestroyVM(ctx, s.vmConfig.Name); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("failed to destroy VM: %w", err))
 	}
 
@@ -238,7 +298,7 @@ func (s *Server) sshClient() (*ssh.Client, error) {
 	sshClient, err := ssh.NewClient(
 		s.ServerAddr,
 		"git",
-		s.initPrivateKeyPath,
+		s.clientKeyPath,
 		fmt.Sprintf("%d", s.SSHPort),
 	)
 	if err != nil {
@@ -251,8 +311,8 @@ func (s *Server) sshClient() (*ssh.Client, error) {
 }
 
 func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string) error {
-	// Initialize a bare Git repository on the server
-	initCmd := fmt.Sprintf("git init --bare /srv/git/%s", repoName)
+	// Initialize a bare Git repository on the server with main as default branch
+	initCmd := fmt.Sprintf("git init -b main --bare /srv/git/%s.git", repoName)
 	if stdout, stderr, err := sshClient.Run(initCmd); err != nil {
 		return fmt.Errorf(
 			"failed to initialize bare repository on Git server: stdout=%s; stderr=%s; %w",
@@ -276,9 +336,9 @@ func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string
 
 	tempRepoDirPath := filepath.Join(tempLocalRepoDir, "repo")
 
-	// Initialize git if not already initialized
+	// Initialize git if not already initialized (with main as default branch)
 	if _, err := os.Stat(filepath.Join(tempRepoDirPath, ".git")); os.IsNotExist(err) {
-		initGitCmd := exec.Command("git", "init")
+		initGitCmd := exec.Command("git", "init", "-b", "main")
 		initGitCmd.Dir = tempRepoDirPath
 		if output, err := initGitCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to git init local repo: %w\nOutput: %s", err, output)
@@ -312,9 +372,10 @@ func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string
 	}
 
 	// Add remote and push
-	remoteURL := fmt.Sprintf("ssh://git@%s:%d/srv/git/%s", s.vmIPAddress, s.SSHPort, repoName)
+	remoteURL := fmt.Sprintf("ssh://git@%s:%d/srv/git/%s.git", s.vmIPAddress, s.SSHPort, repoName)
 
 	// Remove existing origin remote if it exists
+	var cmd *exec.Cmd
 	cmd = exec.Command("git", "remote", "remove", "origin")
 	cmd.Dir = tempRepoDirPath
 	if _, err := cmd.CombinedOutput(); err != nil {
@@ -329,7 +390,7 @@ func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string
 	}
 
 	// Commit any uncommitted changes
-	cmd := exec.Command("git", "add", ".")
+	cmd = exec.Command("git", "add", ".")
 	cmd.Dir = tempRepoDirPath
 	if _, err := cmd.CombinedOutput(); err != nil {
 		// ignore errors, files might already be added
@@ -348,7 +409,7 @@ func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string
 		os.Environ(),
 		fmt.Sprintf(
 			"GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
-			s.initPrivateKeyPath,
+			s.clientKeyPath,
 		),
 	)
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -359,7 +420,7 @@ func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string
 }
 
 func (s *Server) GetRepoUrl(repoName string) string {
-	return fmt.Sprintf("ssh://git@%s/srv/git/%s", s.ServerAddr, repoName)
+	return fmt.Sprintf("ssh://git@%s/srv/git/%s.git", s.ServerAddr, repoName)
 }
 
 func (s *Server) GetVMIPAddress() string {

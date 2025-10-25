@@ -1,8 +1,8 @@
 # -- command to update package manager repos
-update: ["apt-get", "update"]
+update: ["sudo", "apt-get", "update"]
 
 # -- command to install packages
-install: ["apt-get", "install", "-y"]
+install: ["sudo", "apt-get", "install", "-y"]
 
 # -- command to upgrade packages
-upgrade: ["apt-get", "upgrade", "-y"]
+upgrade: ["sudo", "apt-get", "upgrade", "-y"]

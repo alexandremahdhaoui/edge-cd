@@ -3,6 +3,8 @@ package ssh
 import (
 	"fmt"
 	"sync"
+
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execution"
 )
 
 // MockRunner is a mock implementation of the Runner interface for testing.
@@ -42,6 +44,29 @@ func (m *MockRunner) Run(cmd string) (stdout, stderr string, err error) {
 	}
 
 	return m.DefaultStdout, m.DefaultStderr, m.DefaultErr
+}
+
+// RunWithBuilder records the command built from a CommandBuilder and returns a predefined response or a default.
+// It extracts the command string and environment variables from the builder and composes them into a full command string,
+// then delegates to Run() to record and return the response.
+func (m *MockRunner) RunWithBuilder(builder *execution.CommandBuilder) (stdout, stderr string, err error) {
+	// Build the command to get the full command string and environment variables
+	builtCmd := builder.Build()
+
+	// Extract the command string from the built command
+	// builtCmd.Args is ["sh", "-c", "actual_command_with_prepend"]
+	if len(builtCmd.Args) < 3 {
+		return "", "", fmt.Errorf("invalid command structure from builder")
+	}
+	commandStr := builtCmd.Args[2]
+
+	// For the mock runner, we only need the command string itself
+	// The builder's environment variables are already in builtCmd.Env,
+	// but for test mocking purposes, we just use the command string
+	// as the tests set responses based on command strings, not env vars
+
+	// Delegate to Run() to record the command and return the response
+	return m.Run(commandStr)
 }
 
 // SetResponse sets a specific response for a given command.

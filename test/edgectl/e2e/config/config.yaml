@@ -1,0 +1,29 @@
+pollingIntervalSecond: 5
+
+config:
+  spec: config.yaml
+  path: /home/ubuntu/edge-cd-config
+  repo:
+    destPath: /home/ubuntu/edge-cd-config
+    url: ssh://git@192.168.122.87:22/srv/git/user-config.git
+
+edgeCD:
+  repo:
+    branch: main
+    destinationPath: /usr/local/src/edge-cd
+    url: ssh://git@192.168.122.87:22/srv/git/edge-cd.git
+
+log:
+  format: console
+
+serviceManager:
+  name: systemd
+
+packageManager:
+  name: apt
+  requiredPackages:
+    - git
+    - curl
+  autoUpgrade: false
+
+files: []

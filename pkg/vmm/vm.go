@@ -27,6 +27,7 @@ const (
 type VMM struct {
 	conn    *libvirt.Connect
 	domains map[string]*libvirt.Domain
+	baseDir string // Optional base directory for VM temporary files
 	// virtiofsds stores the virtiofsd processes started for each VM,
 	// along with their cancellation functions.
 	virtiofsds map[string][]struct {
@@ -35,20 +36,39 @@ type VMM struct {
 	}
 }
 
+// VMMOption is a function that modifies VMM configuration
+type VMMOption func(*VMM)
+
+// WithBaseDir returns an option that sets the base directory for VM temporary files
+func WithBaseDir(baseDir string) VMMOption {
+	return func(v *VMM) {
+		v.baseDir = baseDir
+	}
+}
+
 // NewVMM creates a new VMM instance and connects to libvirt.
-func NewVMM() (*VMM, error) {
+// Optional options can be passed to configure the VMM.
+func NewVMM(opts ...VMMOption) (*VMM, error) {
 	conn, err := libvirt.NewConnect("qemu:///system")
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
-	return &VMM{
+	vmm := &VMM{
 		conn:    conn,
 		domains: make(map[string]*libvirt.Domain),
+		baseDir: "",
 		virtiofsds: make(map[string][]struct {
 			Cmd    *exec.Cmd
 			Cancel context.CancelFunc
 		}),
-	}, nil
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(vmm)
+	}
+
+	return vmm, nil
 }
 
 // Close closes the libvirt connection.
@@ -69,6 +89,7 @@ type VMConfig struct {
 	Network        string
 	UserData       cloudinit.UserData
 	VirtioFS       []VirtioFSConfig // New field for virtiofs mounts
+	TempDir        string           // Optional: directory for temporary VM files (disk overlay, cloud-init ISO). Defaults to os.TempDir() if empty
 }
 
 type VirtioFSConfig struct {
@@ -89,20 +110,30 @@ func NewVMConfig(name, imagePath string, userData cloudinit.UserData) VMConfig {
 }
 
 // CreateVM creates and starts a new virtual machine.
-func (v *VMM) CreateVM(cfg VMConfig) (*libvirt.Domain, error) {
+// Returns metadata about the created VM including its IP address and domain XML.
+func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
+	// Determine temp directory: cfg.TempDir > VMM.baseDir > os.TempDir()
+	tempDir := cfg.TempDir
+	if tempDir == "" && v.baseDir != "" {
+		tempDir = v.baseDir
+	}
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
+
 	userData, err := cfg.UserData.Render()
 	if err != nil {
 		return nil, err
 	}
 
-	cloudInitISOPath, err := generateCloudInitISO(cfg.Name, userData)
+	cloudInitISOPath, err := generateCloudInitISO(cfg.Name, userData, tempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud-init ISO: %w", err)
 	}
 	defer os.Remove(cloudInitISOPath)
 
 	// -- Create overlay vm image
-	vmDiskPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s.qcow2", cfg.Name))
+	vmDiskPath := filepath.Join(tempDir, fmt.Sprintf("%s.qcow2", cfg.Name))
 	qemuImgCmd := exec.Command(
 		"qemu-img",
 		"create",
@@ -116,7 +147,8 @@ func (v *VMM) CreateVM(cfg VMConfig) (*libvirt.Domain, error) {
 	if output, err := qemuImgCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("failed to create VM disk: %w\nOutput: %s", err, output)
 	}
-	defer os.Remove(vmDiskPath)
+	// Note: vmDiskPath is deleted in DestroyVM, not here
+	// This allows the VM to keep using the disk while running
 
 	var filesystems []libvirtxml.DomainFilesystem
 
@@ -293,14 +325,152 @@ func (v *VMM) CreateVM(cfg VMConfig) (*libvirt.Domain, error) {
 	}
 
 	v.domains[cfg.Name] = dom
-	return dom, nil
+
+	// Capture domain XML for recovery/debugging
+	domXML, err := dom.GetXMLDesc(0)
+	if err != nil {
+		// Log error but don't fail - this is for debugging purposes
+		fmt.Printf("Warning: failed to get domain XML for %s: %v\n", cfg.Name, err)
+		domXML = ""
+	}
+
+	// Get the VM's IP address with retry logic
+	ipAddress, err := v.GetDomainIP(context.Background(), cfg.Name, 60*time.Second)
+	if err != nil {
+		// Log but don't fail - IP might not be available immediately
+		fmt.Printf("Warning: failed to get IP for VM %s: %v\n", cfg.Name, err)
+		ipAddress = ""
+	}
+
+	// Return metadata about the created VM
+	return &VMMetadata{
+		Name:      cfg.Name,
+		IP:        ipAddress,
+		DomainXML: domXML,
+		SSHPort:   22,
+		MemoryMB:  cfg.MemoryMB,
+		VCPUs:     cfg.VCPUs,
+	}, nil
 }
 
-// DestroyVM destroys a virtual machine.
-func (v *VMM) DestroyVM(vmName string) error {
+// DomainExists checks if a VM domain exists in libvirt
+func (v *VMM) DomainExists(ctx context.Context, name string) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	default:
+	}
+
+	dom, ok := v.domains[name]
+	if !ok || dom == nil {
+		return false, nil
+	}
+
+	// Try to get the domain state to confirm it still exists
+	_, _, err := dom.GetState()
+	if err != nil {
+		return false, nil // Domain doesn't exist
+	}
+
+	return true, nil
+}
+
+// GetDomainIP retrieves the IP address of a running VM
+// Polls with backoff up to the specified timeout duration
+func (v *VMM) GetDomainIP(ctx context.Context, name string, timeout time.Duration) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+	}
+
+	dom, ok := v.domains[name]
+	if !ok || dom == nil {
+		return "", fmt.Errorf("VM %s not found or not running", name)
+	}
+
+	// Retry with exponential backoff up to timeout
+	deadline := time.Now().Add(timeout)
+	backoff := 1 * time.Second
+	maxBackoff := 30 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timed out waiting for VM %s IP address", name)
+		}
+
+		// Try to get IP address
+		ifaces, err := dom.ListAllInterfaceAddresses(
+			libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE,
+		)
+		if err == nil {
+			for _, iface := range ifaces {
+				for _, addr := range iface.Addrs {
+					if addr.Type == libvirt.IP_ADDR_TYPE_IPV4 {
+						return strings.Split(addr.Addr, "/")[0], nil
+					}
+				}
+			}
+		}
+
+		// Wait before retrying with exponential backoff
+		waitTime := backoff
+		if backoff < maxBackoff {
+			backoff = time.Duration(float64(backoff) * 1.5)
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(waitTime):
+			// Continue to next iteration
+		}
+	}
+}
+
+// GetDomainXML returns the full XML definition of a domain
+func (v *VMM) GetDomainXML(ctx context.Context, name string) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+	}
+
+	dom, ok := v.domains[name]
+	if !ok || dom == nil {
+		return "", fmt.Errorf("VM %s not found", name)
+	}
+
+	xml, err := dom.GetXMLDesc(0)
+	if err != nil {
+		return "", fmt.Errorf("failed to get domain XML for %s: %w", name, err)
+	}
+
+	return xml, nil
+}
+
+// DestroyVM destroys a virtual machine and deletes its storage unconditionally
+// This stops the VM, undefines it in libvirt, and deletes its disk files
+// Caller is responsible for deciding whether to call this
+func (v *VMM) DestroyVM(ctx context.Context, vmName string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	dom, ok := v.domains[vmName]
 	if !ok || dom == nil {
-		return nil // Already destroyed or not created
+		return fmt.Errorf("VM %s not found", vmName)
 	}
 
 	state, _, err := dom.GetState()
@@ -308,14 +478,29 @@ func (v *VMM) DestroyVM(vmName string) error {
 		return fmt.Errorf("failed to get domain state for %s: %w", vmName, err)
 	}
 
+	// Stop the VM if it's running
 	if state == libvirt.DOMAIN_RUNNING {
 		if err := dom.Destroy(); err != nil {
 			return fmt.Errorf("failed to destroy domain %s: %w", vmName, err)
 		}
 	}
 
+	// Undefine the domain from libvirt
 	if err := dom.Undefine(); err != nil {
 		return fmt.Errorf("failed to undefine domain %s: %w", vmName, err)
+	}
+
+	// Delete the VM's disk file from /tmp
+	vmDiskPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s.qcow2", vmName))
+	if err := os.Remove(vmDiskPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete VM disk %s: %w", vmDiskPath, err)
+	}
+
+	// Delete the cloud-init ISO if it exists
+	cloudInitISOPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-cloud-init.iso", vmName))
+	if err := os.Remove(cloudInitISOPath); err != nil && !os.IsNotExist(err) {
+		// Log but don't fail - this is just cleanup
+		fmt.Printf("Warning: failed to delete cloud-init ISO %s: %v\n", cloudInitISOPath, err)
 	}
 
 	dom.Free()
@@ -323,13 +508,13 @@ func (v *VMM) DestroyVM(vmName string) error {
 	return nil
 }
 
-func generateCloudInitISO(vmName, userData string) (string, error) {
+func generateCloudInitISO(vmName, userData, tempDir string) (string, error) {
 	metaData := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", vmName, vmName)
 
-	isoPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-cloud-init.iso", vmName))
+	isoPath := filepath.Join(tempDir, fmt.Sprintf("%s-cloud-init.iso", vmName))
 
 	// Create a temporary directory for cloud-init config files
-	cloudInitDir := filepath.Join(os.TempDir(), fmt.Sprintf("%s-cloud-init-config", vmName))
+	cloudInitDir := filepath.Join(tempDir, fmt.Sprintf("%s-cloud-init-config", vmName))
 	if err := os.MkdirAll(cloudInitDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create cloud-init config directory: %w", err)
 	}

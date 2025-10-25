@@ -47,9 +47,15 @@ func main() {
 		configPath := bootstrapCmd.String("config-path", "", "Path to the directory containing the config spec file")
 		configSpec := bootstrapCmd.String("config-spec", "", "Name of the config spec file")
 		edgeCDRepo := bootstrapCmd.String("edge-cd-repo", "https://github.com/alexandremahdhaoui/edge-cd.git", "URL of the edge-cd Git repository")
+		edgeCDBranch := bootstrapCmd.String("edgecd-branch", "main", "Branch name for the edge-cd repository (default: main)")
+		configBranch := bootstrapCmd.String("config-branch", "main", "Branch name for the config repository (default: main)")
 		packages := bootstrapCmd.String("packages", "", "Comma-separated list of packages to install")
-		serviceManager := bootstrapCmd.String("service-manager", "procd", "Service manager to use (e.g., 'procd', 'systemd')")
+		serviceManager := bootstrapCmd.String("service-manager", "prodc", "Service manager to use (e.g., 'prodc', 'systemd')")
 		packageManager := bootstrapCmd.String("package-manager", "opkg", "Package manager to use (e.g., 'opkg', 'apt')")
+		edgeCDRepoDestPath := bootstrapCmd.String("edge-cd-repo-dest", "/usr/local/src/edge-cd", "Destination path for edge-cd repository on target device")
+		userConfigRepoDestPath := bootstrapCmd.String("user-config-repo-dest", "/usr/local/src/edge-cd-config", "Destination path for user config repository on target device")
+		prependCmd := bootstrapCmd.String("inject-prepend-cmd", "", "Command to prepend to privileged operations (e.g., 'sudo')")
+		injectEnv := bootstrapCmd.String("inject-env", "", "Environment variables to inject to target (e.g., 'GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no')")
 
 		bootstrapCmd.Usage = func() {
 			fmt.Fprintf(bootstrapCmd.Output(), "Usage of %s bootstrap:\n", os.Args[0])
@@ -84,9 +90,9 @@ func main() {
 			log.Fatalf("Failed to create SSH client: %v", err)
 		}
 
-		// Define remote paths
-		const remoteEdgeCDRepoDestPath = "/opt/edge-cd"
-		const userConfigRepoPath = "/opt/user-config"
+		// Define remote paths (from flags or defaults)
+		remoteEdgeCDRepoDestPath := *edgeCDRepoDestPath
+		userConfigRepoPath := *userConfigRepoDestPath
 
 		// Clone edge-cd repo locally to get package manager configs
 		localEdgeCDRepoTempDir, err := os.MkdirTemp("", "edgectl-local-edge-cd-repo-")
@@ -95,7 +101,7 @@ func main() {
 		}
 		defer os.RemoveAll(localEdgeCDRepoTempDir) // Clean up temp directory
 
-		localCloneCmd := exec.Command("git", "clone", *edgeCDRepo, localEdgeCDRepoTempDir)
+		localCloneCmd := exec.Command("git", "clone", "-b", *edgeCDBranch, *edgeCDRepo, localEdgeCDRepoTempDir)
 		localCloneCmd.Stdout = os.Stderr
 		localCloneCmd.Stderr = os.Stderr
 		// Use the environment as-is, which should include GIT_SSH_COMMAND if set by the caller
@@ -112,19 +118,24 @@ func main() {
 			log.Fatalf("Failed to clone edge-cd repository locally: %v", err)
 		}
 
+		// Prepare GIT_SSH_COMMAND for the remote git operations (gitSSHCmd already defined above)
+		gitsshEnv := fmt.Sprintf("GIT_SSH_COMMAND='%s'", gitSSHCmd)
+
+		// Merge with injected environment variables if provided
+		if *injectEnv != "" {
+			gitsshEnv = gitsshEnv + " " + *injectEnv
+		}
+
 		// Package Provisioning
 		pkgs := strings.Split(*packages, ",")
 		if len(pkgs) > 0 {
-			if err := provision.ProvisionPackages(sshClient, pkgs, *packageManager, localEdgeCDRepoTempDir, *edgeCDRepo, remoteEdgeCDRepoDestPath); err != nil {
+			if err := provision.ProvisionPackagesWithEnv(sshClient, pkgs, *packageManager, localEdgeCDRepoTempDir, *edgeCDRepo, remoteEdgeCDRepoDestPath, gitsshEnv); err != nil {
 				log.Fatalf("Failed to provision packages: %v", err)
 			}
 		}
 
 		// Repo Cloning (only user config repo needs to be cloned here, edge-cd repo is handled in ProvisionPackages)
-		if err := provision.CloneOrPullRepo(sshClient, *configRepo, userConfigRepoPath); err != nil {
-			log.Fatalf("Failed to clone user config repo: %v", err)
-		}
-		if err := provision.CloneOrPullRepo(sshClient, *configRepo, userConfigRepoPath); err != nil {
+		if err := provision.CloneOrPullRepoWithBranchAndEnv(sshClient, *configRepo, userConfigRepoPath, *configBranch, gitsshEnv, *prependCmd); err != nil {
 			log.Fatalf("Failed to clone user config repo: %v", err)
 		}
 
@@ -149,7 +160,7 @@ func main() {
 			}
 		}
 
-		if _, _, err := sshClient.Run("mkdir -p /etc/edge-cd"); err != nil {
+		if _, _, err := sshClient.Run("sudo mkdir -p /etc/edge-cd && sudo chown ubuntu:ubuntu /etc/edge-cd && sudo chmod 755 /etc/edge-cd"); err != nil {
 			// ignore error if directory already exists
 		}
 
@@ -158,8 +169,7 @@ func main() {
 		}
 
 		// Service Setup
-		const edgeCDRepoPath = "/usr/local/src/edge-cd" // Re-declare the constant here
-		if err := provision.SetupEdgeCDService(sshClient, *serviceManager, edgeCDRepoPath); err != nil {
+		if err := provision.SetupEdgeCDService(sshClient, *serviceManager, remoteEdgeCDRepoDestPath, *prependCmd); err != nil {
 			log.Fatalf("Failed to setup edge-cd service: %v", err)
 		}
 

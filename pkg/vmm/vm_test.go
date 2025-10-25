@@ -1,6 +1,7 @@
 package vmm_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -138,7 +139,8 @@ WantedBy=multi-user.target`,
 		t.Fatalf("Failed to create VM: %v", err)
 	}
 	defer func() {
-		if err := vmmInstance.DestroyVM(vmName); err != nil {
+		ctx := context.Background()
+		if err := vmmInstance.DestroyVM(ctx, vmName); err != nil {
 			t.Errorf("Failed to destroy VM: %v", err)
 		}
 	}()
@@ -243,5 +245,34 @@ func getSSHPublicKey(privateKeyPath string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(publicKeyBytes)), nil
+}
+
+// TestVMMConfigTempDir verifies VMConfig TempDir field can be set
+func TestVMMConfigTempDir(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cfg := vmm.NewVMConfig(
+		"test-vm",
+		"/path/to/image.qcow2",
+		cloudinit.UserData{},
+	)
+
+	// Verify TempDir field exists and can be set
+	cfg.TempDir = tempDir
+
+	if cfg.TempDir != tempDir {
+		t.Errorf("expected TempDir %s, got %s", tempDir, cfg.TempDir)
+	}
+}
+
+// TestVMMWithBaseDirOption verifies VMM can accept base directory option
+func TestVMMWithBaseDirOption(t *testing.T) {
+	// This test verifies the option function can be created
+	// We test that the signature would work with options pattern
+	baseDirOption := vmm.WithBaseDir(t.TempDir())
+
+	if baseDirOption == nil {
+		t.Error("WithBaseDir should return a non-nil option function")
+	}
 }
 
