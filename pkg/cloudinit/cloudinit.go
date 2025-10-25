@@ -12,6 +12,7 @@ type User struct {
 	Name              string   `json:"name"`
 	Sudo              string   `json:"sudo"`
 	Shell             string   `json:"shell"`
+	HomeDir           string   `json:"homedir,omitempty"`
 	SSHAuthorizedKeys []string `json:"ssh_authorized_keys"`
 	SSHKeys           *SSHKeys `json:"ssh_keys,omitempty"`
 	SSHDeleteKeys     bool     `json:"ssh_deletekeys,omitempty"`

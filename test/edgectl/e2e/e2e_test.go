@@ -110,19 +110,29 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	)
 	t.Logf("[INFO] Creating VM")
 	// --- Test VM Lifecycle ---
-	vmConn, dom, err := vmm.CreateVM(cfg)
+	vmManager, err := vmm.NewVMM()
+	if err != nil {
+		t.Fatalf("Failed to create VMM instance: %v", err)
+	}
+	defer func() {
+		if err := vmManager.Close(); err != nil {
+			t.Errorf("Failed to close VMM connection: %v", err)
+		}
+	}()
+
+	_, err = vmManager.CreateVM(cfg)
 	if err != nil {
 		t.Fatalf("Failed to create VM: %v", err)
 	}
 	defer func() {
-		if err := vmm.DestroyVM(vmConn, dom); err != nil {
+		if err := vmManager.DestroyVM(vmName); err != nil {
 			t.Errorf("Failed to destroy VM: %v", err)
 		}
 	}()
 
 	t.Log("[INFO] Retrieving VM IP Adrr...")
 	var ipAddress string
-	ipAddress, err = vmm.GetVMIPAddress(vmConn, dom)
+	ipAddress, err = vmManager.GetVMIPAddress(vmName)
 
 	if err != nil || ipAddress == "" {
 		t.Fatalf("Failed to get VM IP address: %v", err)
@@ -146,10 +156,6 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	t.Log("VM available via ssh")
 
 	// --- Setup Git server ---
-	localIPAddr, err := getLocalIPAddr()
-	if err != nil {
-		t.Fatalf("Failed to get local IP address: %v", err)
-	}
 	b, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
 	if err != nil {
 		t.Fatalf("Error getting current repo path: %v", err)
@@ -168,19 +174,13 @@ func TestE2EBootstrapCommand(t *testing.T) {
 		LocalPath: edgeCDRepoSrcPath,
 	}
 
-	gitServer := gitserver.Server{
-		ServerAddr:  localIPAddr.String(),
-		SSHPort:     2222,
-		HostKeyPath: hostSSHKeyPath,
-		AuthorizedKeys: []string{
-			userData.Users[0].SSHKeys.RSAPublic,    // VM's public key for cloning from Git server
-			userData.Users[0].SSHAuthorizedKeys[0], // Host's public key for Git server's SSH client
-		},
-		BaseDir: t.TempDir(),
-		Repo: []gitserver.Repo{
-			{Name: edgeCDRepoName, Source: edgeCDRepoSource},
-			{Name: userConfigRepoName, Source: userConfigRepoSource},
-		},
+	gitServer := gitserver.NewServer(t.TempDir(), imageCachePath, []gitserver.Repo{
+		{Name: edgeCDRepoName, Source: edgeCDRepoSource},
+		{Name: userConfigRepoName, Source: userConfigRepoSource},
+	})
+	gitServer.AuthorizedKeys = []string{
+		userData.Users[0].SSHKeys.RSAPublic,    // VM's public key for cloning from Git server
+		userData.Users[0].SSHAuthorizedKeys[0], // Host's public key for Git server's SSH client
 	}
 
 	if err := gitServer.Run(); err != nil {
@@ -230,6 +230,10 @@ func TestE2EBootstrapCommand(t *testing.T) {
 
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(
+		os.Environ(),
+		fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", hostSSHKeyPath),
+	)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to run `edgectl bootstrap`: %v", err)
 	}

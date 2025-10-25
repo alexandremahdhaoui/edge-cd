@@ -98,6 +98,16 @@ func main() {
 		localCloneCmd := exec.Command("git", "clone", *edgeCDRepo, localEdgeCDRepoTempDir)
 		localCloneCmd.Stdout = os.Stderr
 		localCloneCmd.Stderr = os.Stderr
+		// Use the environment as-is, which should include GIT_SSH_COMMAND if set by the caller
+		// If GIT_SSH_COMMAND is not set, add a default with SSH options
+		gitSSHCmd := os.Getenv("GIT_SSH_COMMAND")
+		if gitSSHCmd == "" {
+			gitSSHCmd = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+		}
+		localCloneCmd.Env = append(
+			os.Environ(),
+			fmt.Sprintf("GIT_SSH_COMMAND=%s", gitSSHCmd),
+		)
 		if err := localCloneCmd.Run(); err != nil {
 			log.Fatalf("Failed to clone edge-cd repository locally: %v", err)
 		}
