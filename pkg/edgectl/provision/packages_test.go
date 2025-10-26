@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/edgectl/provision"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 )
 
@@ -39,12 +40,16 @@ install: ["apt-get", "install", "-y"]
 		remoteEdgeCDRepoURL := "https://github.com/alexandremahdhaoui/edge-cd.git"
 		remoteEdgeCDRepoDestPath := "/usr/local/src/edge-cd"
 
+		// Create context with no env vars or prepend commands
+		ctx := execcontext.New(make(map[string]string), []string{})
+
 		// Set expected responses for the mock runner
+		// Commands will be formatted by execcontext.FormatCmd, which quotes arguments
 		mock.SetResponse(fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath), "", "", nil)
 		mock.SetResponse("apt-get update", "", "", nil)
 		mock.SetResponse("apt-get install -y git curl", "", "", nil)
 
-		if err := provision.ProvisionPackages(mock, packages, "apt", localPkgMgrRepoPath, remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath); err != nil {
+		if err := provision.ProvisionPackages(ctx, mock, packages, "apt", localPkgMgrRepoPath, remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath); err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 
@@ -72,11 +77,14 @@ install: ["apt-get", "install", "-y"]
 		remoteEdgeCDRepoURL := "https://github.com/alexandremahdhaoui/edge-cd.git"
 		remoteEdgeCDRepoDestPath := "/usr/local/src/edge-cd"
 
+		// Create context with no env vars or prepend commands
+		ctx := execcontext.New(make(map[string]string), []string{})
+
 		// Set expected responses for the mock runner
 		mock.SetResponse(fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath), "", "", nil)
 		mock.SetResponse("apt-get update", "", "", nil)
 
-		if err := provision.ProvisionPackages(mock, packages, "apt", localPkgMgrRepoPath, remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath); err != nil {
+		if err := provision.ProvisionPackages(ctx, mock, packages, "apt", localPkgMgrRepoPath, remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath); err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 

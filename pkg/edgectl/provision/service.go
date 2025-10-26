@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alexandremahdhaoui/edge-cd/pkg/execution"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"gopkg.in/yaml.v3"
 )
@@ -20,22 +20,33 @@ type ServiceManagerConfig struct {
 }
 
 // SetupEdgeCDService sets up and enables the edge-cd service on the remote device.
-// prependCmd is prepended to commands that require elevated privileges (e.g., "sudo")
+// The context parameter should contain any required prepend commands (e.g., "sudo").
 func SetupEdgeCDService(
+	execCtx execcontext.Context,
 	runner ssh.Runner,
-	prependCmd string,
-	envs []string,
-	serviceManagerName, edgeCDRepoPath, prependCmd string,
+	serviceManagerName, edgeCDRepoPath string,
 ) error {
-	// Copy service file to destination
-	// Use CommandBuilder to compose cp command with optional prepend
-	cmdBuilder := execution.
-		NewCommandBuilder(fmt.Sprintf("cp %s %s", serviceSourcePath, serviceDestPath)).
-		WithPrependCmd(prependCmd)
+	// Load the service manager configuration
+	config, err := loadServiceManagerConfig(edgeCDRepoPath, serviceManagerName)
+	if err != nil {
+		return err
+	}
 
-	copyCmd := cmdBuilder.Build()
+	// Determine source and destination paths for the service file
+	serviceSourcePath := filepath.Join(
+		edgeCDRepoPath,
+		"cmd",
+		"edge-cd",
+		"service-managers",
+		serviceManagerName,
+		fmt.Sprintf("edge-cd.%s", serviceManagerName),
+	)
+	serviceDestPath := config.EdgeCDService.DestinationPath
+
+	// Copy service file to destination using the context
+	copyCmd := fmt.Sprintf("cp %s %s", serviceSourcePath, serviceDestPath)
 	fmt.Printf("Copying service file from %s to %s...\n", serviceSourcePath, serviceDestPath)
-	stdout, stderr, err := runner.Run(copyCmd)
+	stdout, stderr, err := runner.Run(execCtx, copyCmd)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to copy service file: %w. Stdout: %s, Stderr: %s",
@@ -45,8 +56,10 @@ func SetupEdgeCDService(
 		)
 	}
 
+	// Build and execute enable command
+	enableCmd := buildCommand(config.Commands["enable"], "", "edge-cd")
 	fmt.Printf("Enabling service %s...\n", serviceManagerName)
-	stdout, stderr, err = runner.Run(enableCmd)
+	stdout, stderr, err = runner.Run(execCtx, enableCmd)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to enable service: %w. Stdout: %s, Stderr: %s",
@@ -56,15 +69,26 @@ func SetupEdgeCDService(
 		)
 	}
 
-	fmt.Printf("Starting service %s...\n", serviceManagerName)
-	stdout, stderr, err = runner.Run(startCmd)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to start service: %w. Stdout: %s, Stderr: %s",
-			err,
-			stdout,
-			stderr,
-		)
+	// Build and execute start command (fallback to restart if start doesn't exist)
+	var startCmd string
+	if len(config.Commands["start"]) > 0 {
+		startCmd = buildCommand(config.Commands["start"], "", "edge-cd")
+	} else if len(config.Commands["restart"]) > 0 {
+		// Some service managers (like procd) use restart instead of start
+		startCmd = buildCommand(config.Commands["restart"], "", "edge-cd")
+	}
+
+	if startCmd != "" {
+		fmt.Printf("Starting service %s...\n", serviceManagerName)
+		stdout, stderr, err = runner.Run(execCtx, startCmd)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to start service: %w. Stdout: %s, Stderr: %s",
+				err,
+				stdout,
+				stderr,
+			)
+		}
 	}
 
 	return nil
@@ -96,36 +120,26 @@ func loadServiceManagerConfig(
 	return &config, nil
 }
 
-// buildCommand constructs a shell command from a command pattern array using CommandBuilder.
-// Replaces "%s" with prependCmd and "__SERVICE_NAME__" with serviceName.
-// Returns a properly formatted command string with prepend handled via CommandBuilder.
-func buildCommand(cmdPattern []string, prependCmd, serviceName string) string {
+// buildCommand constructs a command from a command pattern array.
+// Replaces "__SERVICE_NAME__" with serviceName throughout the command parts.
+// Returns a properly formatted command string.
+func buildCommand(cmdPattern []string, _ string, serviceName string) string {
 	if len(cmdPattern) == 0 {
 		return ""
 	}
 
-	// First pass: build the base command without the %s placeholder
+	// Build the command, replacing placeholders
 	var parts []string
 	for _, part := range cmdPattern {
 		if part == "%s" {
-			// Skip the placeholder - we'll handle prepend via CommandBuilder
+			// Skip the prepend placeholder - prepend is handled via execution.Context
 			continue
-		} else if part == "__SERVICE_NAME__" {
-			parts = append(parts, serviceName)
 		} else {
-			parts = append(parts, part)
+			// Replace __SERVICE_NAME__ placeholder within the string
+			replacedPart := strings.ReplaceAll(part, "__SERVICE_NAME__", serviceName)
+			parts = append(parts, replacedPart)
 		}
 	}
 
-	baseCmd := strings.Join(parts, " ")
-
-	// Use CommandBuilder to compose with prependCmd
-	builder := execution.NewCommandBuilder(baseCmd)
-	if prependCmd != "" {
-		builder.WithPrependCmd(prependCmd)
-	}
-
-	// For buildCommand, we return just the composed string (not an exec.Cmd)
-	// Extract it from the builder's composition
-	return builder.Build()
+	return strings.Join(parts, " ")
 }

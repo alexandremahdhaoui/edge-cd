@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 )
 
@@ -118,7 +119,6 @@ func ExecuteBootstrapTest(ctx context.Context, env *TestEnvironment, config Exec
 		"--package-manager", config.PackageManager,
 		"--edge-cd-repo-dest", remoteEdgeCDRepoDestPath,
 		"--user-config-repo-dest", remoteUserConfigRepoDestPath,
-		"--inject-prepend-cmd", "sudo",
 		"--inject-env", injectEnv,
 	)
 
@@ -223,9 +223,12 @@ func verifyBootstrapResults(
 		})
 	}
 
+	// Create an empty context for verification commands
+	verifyCtx := execcontext.New(make(map[string]string), []string{})
+
 	// Run all verifications
 	for _, v := range verifications {
-		_, _, err := sshClient.Run(v.command)
+		_, _, err := sshClient.Run(verifyCtx, v.command)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("%s verification failed: %w", v.name, err))
 		}

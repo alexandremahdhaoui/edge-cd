@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 )
 
@@ -19,45 +20,37 @@ func TestSetupEdgeCDService(t *testing.T) {
 	tests := []struct {
 		name             string
 		serviceManager   string
-		prependCmd       string
+		prependCmd       []string
 		expectedCommands []string
 	}{
 		{
 			name:           "systemd service setup without prepend command",
 			serviceManager: "systemd",
-			prependCmd:     "",
+			prependCmd:     []string{},
 			expectedCommands: []string{
-				fmt.Sprintf("test -L %s && readlink %s | grep -q '/dev/null'", "/etc/systemd/system/edge-cd.service", "/etc/systemd/system/edge-cd.service"),
-				"rm /etc/systemd/system/edge-cd.service",
-				"systemctl daemon-reload",
-				"systemctl unmask edge-cd.service",
-				fmt.Sprintf("cp %s /etc/systemd/system/edge-cd.service", filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/service")),
-				"systemctl enable edge-cd.service",
-				"systemctl start edge-cd.service",
+				fmt.Sprintf("cp %s /etc/systemd/system/edge-cd.service", filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/edge-cd.systemd")),
+				"systemctl enable edge-cd",
+				"systemctl start edge-cd",
 			},
 		},
 		{
 			name:           "systemd service setup with sudo prepend command",
 			serviceManager: "systemd",
-			prependCmd:     "sudo",
+			prependCmd:     []string{"sudo", "-E"},
 			expectedCommands: []string{
-				fmt.Sprintf("test -L %s && readlink %s | grep -q '/dev/null'", "/etc/systemd/system/edge-cd.service", "/etc/systemd/system/edge-cd.service"),
-				"sudo rm /etc/systemd/system/edge-cd.service",
-				"sudo systemctl daemon-reload",
-				"sudo systemctl unmask edge-cd.service",
-				fmt.Sprintf("sudo cp %s /etc/systemd/system/edge-cd.service", filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/service")),
-				"sudo systemctl enable edge-cd.service",
-				"sudo systemctl start edge-cd.service",
+				fmt.Sprintf("sudo -E cp %s /etc/systemd/system/edge-cd.service", filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/edge-cd.systemd")),
+				"sudo -E systemctl enable edge-cd",
+				"sudo -E systemctl start edge-cd",
 			},
 		},
 		{
 			name:           "procd service setup without prepend command",
 			serviceManager: "procd",
-			prependCmd:     "",
+			prependCmd:     []string{},
 			expectedCommands: []string{
-				fmt.Sprintf("cp %s /etc/init.d/edge-cd", filepath.Join(repoPath, "cmd/edge-cd/service-managers/procd/service")),
+				fmt.Sprintf("cp %s /etc/init.d/edge-cd", filepath.Join(repoPath, "cmd/edge-cd/service-managers/procd/edge-cd.procd")),
 				"/etc/init.d/edge-cd enable",
-				"/etc/init.d/edge-cd start",
+				"service edge-cd restart",
 			},
 		},
 	}
@@ -66,15 +59,11 @@ func TestSetupEdgeCDService(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockRunner := ssh.NewMockRunner()
 
-			// Mock the checkMaskedSymlinkCmd to return success (no error) for systemd case
-			if tt.serviceManager == "systemd" {
-				mockRunner.SetResponse(
-					fmt.Sprintf("test -L %s && readlink %s | grep -q '/dev/null'", "/etc/systemd/system/edge-cd.service", "/etc/systemd/system/edge-cd.service"),
-					"", "", nil,
-				)
-			}
+			// Create context with prepend command if provided
+			envs := make(map[string]string)
+			ctx := execcontext.New(envs, tt.prependCmd)
 
-			err := SetupEdgeCDService(mockRunner, tt.serviceManager, repoPath, tt.prependCmd)
+			err := SetupEdgeCDService(ctx, mockRunner, tt.serviceManager, repoPath)
 			if err != nil {
 				t.Fatalf("SetupEdgeCDService failed: %v", err)
 			}

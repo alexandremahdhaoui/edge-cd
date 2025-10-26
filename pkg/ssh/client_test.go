@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 )
 
@@ -232,7 +233,8 @@ func TestE2ERealSSHClient(t *testing.T) {
 		t.Fatalf("Failed to create SSH client: %v", err)
 	}
 
-	stdout, stderr, err := client.Run("echo hello from real client")
+	ctx := execcontext.New(make(map[string]string), []string{})
+	stdout, stderr, err := client.Run(ctx, "echo hello from real client")
 	if err != nil {
 		t.Fatalf("Failed to run command via real SSH client: %v\nStderr: %s", err, stderr)
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/cloudinit"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 )
@@ -301,7 +302,8 @@ func (s *Server) sshClient() (*ssh.Client, error) {
 func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string) error {
 	// Initialize a bare Git repository on the server with main as default branch
 	initCmd := fmt.Sprintf("git init -b main --bare /srv/git/%s.git", repoName)
-	if stdout, stderr, err := sshClient.Run(initCmd); err != nil {
+	ctx := execcontext.New(make(map[string]string), []string{})
+	if stdout, stderr, err := sshClient.Run(ctx, initCmd); err != nil {
 		return fmt.Errorf(
 			"failed to initialize bare repository on Git server: stdout=%s; stderr=%s; %w",
 			stdout, stderr, err,

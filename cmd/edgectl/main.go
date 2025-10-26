@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/edgectl/provision"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 )
 
@@ -102,11 +103,6 @@ func main() {
 			"/usr/local/src/edge-cd-config",
 			"Destination path for user config repository on target device",
 		)
-		prependCmd := bootstrapCmd.String(
-			"inject-prepend-cmd",
-			"",
-			"Command to prepend to privileged operations (e.g., 'sudo')",
-		)
 		injectEnv := bootstrapCmd.String(
 			"inject-env",
 			"",
@@ -150,6 +146,25 @@ func main() {
 		remoteEdgeCDRepoDestPath := *edgeCDRepoDestPath
 		userConfigRepoPath := *userConfigRepoDestPath
 
+		// Create execution contexts
+		// Build environment variables map
+		envs := make(map[string]string)
+
+		// Add injected environment variables if provided
+		if *injectEnv != "" {
+			envKey, envValue := parseEnvFromFlag(*injectEnv)
+			if envKey != "" {
+				envs[envKey] = envValue
+			}
+		}
+
+		// Create contexts using the immutable factory function
+		// targetExecCtx: for remote commands requiring privilege escalation (sudo -E)
+		targetExecCtx := execcontext.New(envs, []string{"sudo", "-E"})
+
+		// localExecCtx: for local git operations without privilege escalation
+		localExecCtx := execcontext.New(envs, []string{})
+
 		// Clone edge-cd repo locally to get package manager configs
 		localEdgeCDRepoTempDir, err := os.MkdirTemp("", "edgectl-local-edge-cd-repo-")
 		if err != nil {
@@ -174,15 +189,15 @@ func main() {
 		// Package Provisioning
 		pkgs := strings.Split(*packages, ",")
 		if len(pkgs) > 0 {
-			if err := provision.ProvisionPackagesWithEnv(sshClient, pkgs, *packageManager, localEdgeCDRepoTempDir, *edgeCDRepo, remoteEdgeCDRepoDestPath, *injectEnv); err != nil {
+			if err := provision.ProvisionPackagesWithEnv(targetExecCtx, sshClient, pkgs, *packageManager, localEdgeCDRepoTempDir, *edgeCDRepo, remoteEdgeCDRepoDestPath); err != nil {
 				log.Fatalf("Failed to provision packages: %v", err)
 			}
 		}
 
 		// Repo Cloning (only user config repo needs to be cloned here, edge-cd repo is handled in ProvisionPackages)
-		// Note: Don't use prependCmd for git operations - they run as ubuntu and need access to SSH keys in ~/.ssh
-		// Git operations don't need privilege escalation; they run as the target user
-		if err := provision.CloneOrPullRepoWithBranchAndEnv(sshClient, *configRepo, userConfigRepoPath, *configBranch, *injectEnv, ""); err != nil {
+		// Note: Git operations run as the target user and don't need privilege escalation
+		// They use localExecCtx which has only the environment variables, no sudo
+		if err := provision.CloneOrPullRepoWithBranchAndEnv(localExecCtx, sshClient, *configRepo, userConfigRepoPath, *configBranch); err != nil {
 			log.Fatalf("Failed to clone user config repo: %v", err)
 		}
 
@@ -207,12 +222,12 @@ func main() {
 			}
 		}
 
-		if err := provision.PlaceConfigYAML(sshClient, configContent, "/etc/edge-cd/config.yaml"); err != nil {
+		if err := provision.PlaceConfigYAML(targetExecCtx, sshClient, configContent, "/etc/edge-cd/config.yaml"); err != nil {
 			log.Fatalf("Failed to place config.yaml: %v", err)
 		}
 
 		// Service Setup
-		if err := provision.SetupEdgeCDService(sshClient, *serviceManager, localEdgeCDRepoTempDir, *prependCmd); err != nil {
+		if err := provision.SetupEdgeCDService(targetExecCtx, sshClient, *serviceManager, localEdgeCDRepoTempDir); err != nil {
 			log.Fatalf("Failed to setup edge-cd service: %v", err)
 		}
 
@@ -223,4 +238,14 @@ func main() {
 		rootCmd.Usage()
 		os.Exit(1)
 	}
+}
+
+// parseEnvFromFlag parses an environment variable string in the format "KEY=value"
+// and returns the key and value separately. If the format is invalid, it returns empty strings.
+func parseEnvFromFlag(envVar string) (key, value string) {
+	parts := strings.SplitN(envVar, "=", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return parts[0], parts[1]
 }

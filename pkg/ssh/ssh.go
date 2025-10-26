@@ -1,12 +1,10 @@
 package ssh
 
 import (
-	"github.com/alexandremahdhaoui/edge-cd/pkg/execution"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 )
 
 // Runner defines the interface for executing commands on a remote host.
 type Runner interface {
-	Run(cmd string) (stdout, stderr string, err error)
-	RunWithEnvs(cmd string) (stdout, stderr string, err error)
-	RunWithBuilder(builder *execution.CommandBuilder) (stdout, stderr string, err error)
+	Run(ctx execcontext.Context, cmd ...string) (stdout, stderr string, err error)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 )
 
@@ -16,9 +17,9 @@ var ErrLockHeld = fmt.Errorf("lock already held at %s", lockFilePath)
 
 // Acquire attempts to acquire a remote file-based lock.
 // It returns ErrLockHeld if the lock is already held.
-func Acquire(runner ssh.Runner) error {
+func Acquire(execCtx execcontext.Context, runner ssh.Runner) error {
 	cmd := fmt.Sprintf("mkdir %s", lockFilePath)
-	_, stderr, err := runner.Run(cmd)
+	_, stderr, err := runner.Run(execCtx, cmd)
 	if err != nil {
 		if strings.Contains(stderr, "File exists") || strings.Contains(stderr, "cannot create directory") {
 			return ErrLockHeld
@@ -30,9 +31,9 @@ func Acquire(runner ssh.Runner) error {
 
 // Release attempts to release a remote file-based lock.
 // It succeeds even if the lock does not exist.
-func Release(runner ssh.Runner) error {
+func Release(execCtx execcontext.Context, runner ssh.Runner) error {
 	cmd := fmt.Sprintf("rmdir %s", lockFilePath)
-	_, stderr, err := runner.Run(cmd) // Capture stderr
+	_, stderr, err := runner.Run(execCtx, cmd) // Capture stderr
 	if err != nil {
 		// If the directory doesn't exist, it's already released, so we don't treat it as an error.
 		if strings.Contains(stderr, "No such file or directory") || strings.Contains(stderr, "not a directory") {

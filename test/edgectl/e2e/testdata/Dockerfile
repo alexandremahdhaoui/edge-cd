@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y openssh-server sudo && rm -rf /var/lib/
 # Allow root login with password (for testing purposes)
 RUN echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
 RUN echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+# Accept environment variables needed for git operations
+RUN echo 'AcceptEnv GIT_SSH_COMMAND' >> /etc/ssh/sshd_config
 
 # Set a default password for root (for testing purposes)
 RUN echo 'root:root' | chpasswd

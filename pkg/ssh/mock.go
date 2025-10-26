@@ -2,9 +2,10 @@ package ssh
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
-	"github.com/alexandremahdhaoui/edge-cd/pkg/execution"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 )
 
 // MockRunner is a mock implementation of the Runner interface for testing.
@@ -32,43 +33,29 @@ func NewMockRunner() *MockRunner {
 	}
 }
 
-// Run records the command and returns a predefined response or a default.
-func (m *MockRunner) Run(cmd string) (stdout, stderr string, err error) {
+// Run records the command formatted with the execution context and returns a predefined response or a default.
+// It mimics SSH behavior: sets environment variables and composes the final command with prepend commands.
+func (m *MockRunner) Run(
+	ctx execcontext.Context,
+	cmd ...string,
+) (stdout, stderr string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.Commands = append(m.Commands, cmd)
+	// Compose the final command (same as SSH client does)
+	finalCmd := strings.Join(cmd, " ")
+	prependCmd := ctx.PrependCmd()
+	if len(prependCmd) > 0 {
+		finalCmd = strings.Join(append(prependCmd, finalCmd), " ")
+	}
 
-	if resp, ok := m.Responses[cmd]; ok {
+	m.Commands = append(m.Commands, finalCmd)
+
+	if resp, ok := m.Responses[finalCmd]; ok {
 		return resp.Stdout, resp.Stderr, resp.Err
 	}
 
 	return m.DefaultStdout, m.DefaultStderr, m.DefaultErr
-}
-
-// RunWithBuilder records the command built from a CommandBuilder and returns a predefined response or a default.
-// It extracts the command string and environment variables from the builder and composes them into a full command string,
-// then delegates to Run() to record and return the response.
-func (m *MockRunner) RunWithBuilder(
-	builder *execution.CommandBuilder,
-) (stdout, stderr string, err error) {
-	// Build the command to get the full command string and environment variables
-	builtCmd := builder.BuildCmd()
-
-	// Extract the command string from the built command
-	// builtCmd.Args is ["sh", "-c", "actual_command_with_prepend"]
-	if len(builtCmd.Args) < 3 {
-		return "", "", fmt.Errorf("invalid command structure from builder")
-	}
-	commandStr := builtCmd.Args[2]
-
-	// Note: We could use builder.GetEnvironmentVars() to get the environment variables
-	// and include them in the recorded command, but for mocking purposes, we keep it simple
-	// and just record the command string as-is. Tests set responses based on command patterns.
-	// The real SSH client (pkg/ssh/client.go) properly prepends environment variables.
-
-	// Delegate to Run() to record the command and return the response
-	return m.Run(commandStr)
 }
 
 // SetResponse sets a specific response for a given command.

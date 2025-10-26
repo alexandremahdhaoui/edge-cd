@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/cloudinit"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/gitserver"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
@@ -166,7 +168,7 @@ func setupTargetVM(
 	// Configure SSH for git operations
 	sshConfig := cloudinit.WriteFile{
 		Path:        "/home/ubuntu/.ssh/config",
-		Content:     "Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile=/dev/null\n",
+		Content:     "Host *\n    IdentityFile ~/.ssh/id_ed25519\n    StrictHostKeyChecking no\n    UserKnownHostsFile=/dev/null\n",
 		Permissions: "0600",
 	}
 
@@ -183,6 +185,9 @@ func setupTargetVM(
 			"/usr/bin/ssh-keygen -t ed25519 -N \"\" -f ${KEY_PATH} -q",
 			"chown ubuntu:ubuntu -R ${USER_HOME}",
 			"chmod 600 ${KEY_PATH}",
+			// Configure SSH server to accept GIT_SSH_COMMAND environment variable
+			"echo 'AcceptEnv GIT_SSH_COMMAND' >> /etc/ssh/sshd_config",
+			"systemctl restart sshd",
 		},
 	}
 
@@ -257,12 +262,14 @@ func FetchTargetVMPublicKey(
 	}
 
 	// Fetch the default public key that cloud-init created
-	stdout, stderr, err := sshClient.Run("cat ~/.ssh/id_ed25519.pub")
+	execCtx := execcontext.New(make(map[string]string), []string{})
+	stdout, stderr, err := sshClient.Run(execCtx, "cat ~/.ssh/id_ed25519.pub")
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch target VM public key: %w\nstderr: %s", err, stderr)
 	}
 
-	return stdout, nil
+	// Trim whitespace to ensure proper formatting in authorized_keys
+	return strings.TrimSpace(stdout), nil
 }
 
 // setupGitServer creates and configures the git server VM
@@ -307,8 +314,8 @@ func setupGitServer(
 	}
 
 	server.AuthorizedKeys = []string{
-		targetPubKey,       // Target VM uses this to clone from git server
-		string(hostPubKey), // Host uses this to SSH to git server
+		targetPubKey,                         // Target VM uses this to clone from git server
+		strings.TrimSpace(string(hostPubKey)), // Host uses this to SSH to git server
 	}
 
 	// Run git server (this creates the VM and sets up repositories)

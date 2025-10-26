@@ -3,13 +3,16 @@ package ssh
 import (
 	"errors"
 	"testing"
+
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 )
 
 func TestMockSSHClient(t *testing.T) {
 	mockRunner := NewMockRunner()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Test default behavior
-	stdout, stderr, err := mockRunner.Run("echo hello")
+	stdout, stderr, err := mockRunner.Run(ctx, "echo hello")
 	if stdout != "" || stderr != "" || err != nil {
 		t.Errorf("Expected empty output and nil error for default, got stdout: %q, stderr: %q, err: %v", stdout, stderr, err)
 	}
@@ -22,7 +25,7 @@ func TestMockSSHClient(t *testing.T) {
 
 	// Test with specific response
 	mockRunner.SetResponse("ls -l", "file1\nfile2\n", "", nil)
-	stdout, stderr, err = mockRunner.Run("ls -l")
+	stdout, stderr, err = mockRunner.Run(ctx, "ls -l")
 	if stdout != "file1\nfile2\n" || stderr != "" || err != nil {
 		t.Errorf("Expected specific output, got stdout: %q, stderr: %q, err: %v", stdout, stderr, err)
 	}
@@ -36,7 +39,7 @@ func TestMockSSHClient(t *testing.T) {
 	// Test with error response
 	mockErr := errors.New("permission denied")
 	mockRunner.SetResponse("rm /root/file", "", "rm: permission denied\n", mockErr)
-	stdout, stderr, err = mockRunner.Run("rm /root/file")
+	stdout, stderr, err = mockRunner.Run(ctx, "rm /root/file")
 	if stdout != "" || stderr != "rm: permission denied\n" || err != mockErr {
 		t.Errorf("Expected specific error, got stdout: %q, stderr: %q, err: %v", stdout, stderr, err)
 	}
