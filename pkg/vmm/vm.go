@@ -342,18 +342,27 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 		ipAddress = ""
 	}
 
+	// Track created files for audit and cleanup
+	createdFiles := []string{vmDiskPath}
+	if cloudInitISOPath != "" {
+		createdFiles = append(createdFiles, cloudInitISOPath)
+	}
+
 	// Return metadata about the created VM
 	return &VMMetadata{
-		Name:      cfg.Name,
-		IP:        ipAddress,
-		DomainXML: domXML,
-		SSHPort:   22,
-		MemoryMB:  cfg.MemoryMB,
-		VCPUs:     cfg.VCPUs,
+		Name:         cfg.Name,
+		IP:           ipAddress,
+		DomainXML:    domXML,
+		SSHPort:      22,
+		MemoryMB:     cfg.MemoryMB,
+		VCPUs:        cfg.VCPUs,
+		CreatedFiles: createdFiles,
 	}, nil
 }
 
-// DomainExists checks if a VM domain exists in libvirt
+// DomainExists checks if a VM domain exists in libvirt.
+// First checks the in-memory domains map for efficiency.
+// If not found in memory, queries libvirt directly (critical for cleanup when using new VMM instances).
 func (v *VMM) DomainExists(ctx context.Context, name string) (bool, error) {
 	select {
 	case <-ctx.Done():
@@ -361,18 +370,36 @@ func (v *VMM) DomainExists(ctx context.Context, name string) (bool, error) {
 	default:
 	}
 
+	// Check in-memory map first (optimization)
 	dom, ok := v.domains[name]
-	if !ok || dom == nil {
+	if ok && dom != nil {
+		// Try to get the domain state to confirm it still exists
+		_, _, err := dom.GetState()
+		if err != nil {
+			return false, nil // Domain doesn't exist
+		}
+		return true, nil
+	}
+
+	// Domain not in memory, query libvirt directly
+	// This is critical for cleanup scenarios where a new VMM instance is created
+	if v.conn == nil {
+		return false, fmt.Errorf("libvirt connection is not initialized")
+	}
+
+	domain, err := v.conn.LookupDomainByName(name)
+	if err != nil {
+		// Domain not found in libvirt
 		return false, nil
 	}
 
-	// Try to get the domain state to confirm it still exists
-	_, _, err := dom.GetState()
-	if err != nil {
-		return false, nil // Domain doesn't exist
+	// Domain exists in libvirt, cache it in memory for future use
+	if domain != nil {
+		v.domains[name] = domain
+		return true, nil
 	}
 
-	return true, nil
+	return false, nil
 }
 
 // GetDomainIP retrieves the IP address of a running VM
@@ -458,6 +485,40 @@ func (v *VMM) GetDomainXML(ctx context.Context, name string) (string, error) {
 	return xml, nil
 }
 
+// GetDomainByName gets a domain handle by name, checking memory first then querying libvirt
+// This helper function supports cleanup scenarios where a new VMM instance is created
+// Returns nil if domain does not exist (allows idempotent cleanup)
+func (v *VMM) GetDomainByName(ctx context.Context, name string) (*libvirt.Domain, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Check in-memory map first (optimization)
+	if dom, ok := v.domains[name]; ok && dom != nil {
+		return dom, nil
+	}
+
+	// Domain not in memory, query libvirt directly
+	if v.conn == nil {
+		return nil, fmt.Errorf("libvirt connection is not initialized")
+	}
+
+	domain, err := v.conn.LookupDomainByName(name)
+	if err != nil {
+		// Domain not found - return nil, not error (for idempotent cleanup)
+		return nil, nil
+	}
+
+	// Cache domain in memory for future use
+	if domain != nil {
+		v.domains[name] = domain
+	}
+
+	return domain, nil
+}
+
 // DestroyVM destroys a virtual machine and deletes its storage unconditionally
 // This stops the VM, undefines it in libvirt, and deletes its disk files
 // Caller is responsible for deciding whether to call this
@@ -468,9 +529,26 @@ func (v *VMM) DestroyVM(ctx context.Context, vmName string) error {
 	default:
 	}
 
-	dom, ok := v.domains[vmName]
-	if !ok || dom == nil {
-		return fmt.Errorf("VM %s not found", vmName)
+	// Get domain handle (checks memory first, then queries libvirt)
+	// GetDomainByName returns nil if domain doesn't exist (for idempotent cleanup)
+	dom, err := v.GetDomainByName(ctx, vmName)
+	if err != nil {
+		return err
+	}
+
+	// If domain doesn't exist, treat as success (idempotent cleanup)
+	if dom == nil {
+		fmt.Printf("VM %s not found in libvirt, skipping destroy\n", vmName)
+		// Still try to delete disk files if they exist
+		tempDir := v.baseDir
+		if tempDir == "" {
+			tempDir = os.TempDir()
+		}
+		vmDiskPath := filepath.Join(tempDir, fmt.Sprintf("%s.qcow2", vmName))
+		cloudInitISOPath := filepath.Join(tempDir, fmt.Sprintf("%s-cloud-init.iso", vmName))
+		os.Remove(vmDiskPath)
+		os.Remove(cloudInitISOPath)
+		return nil
 	}
 
 	state, _, err := dom.GetState()
@@ -490,14 +568,20 @@ func (v *VMM) DestroyVM(ctx context.Context, vmName string) error {
 		return fmt.Errorf("failed to undefine domain %s: %w", vmName, err)
 	}
 
-	// Delete the VM's disk file from /tmp
-	vmDiskPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s.qcow2", vmName))
+	// Determine temp directory: v.baseDir > os.TempDir()
+	tempDir := v.baseDir
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
+
+	// Delete the VM's disk file
+	vmDiskPath := filepath.Join(tempDir, fmt.Sprintf("%s.qcow2", vmName))
 	if err := os.Remove(vmDiskPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete VM disk %s: %w", vmDiskPath, err)
 	}
 
 	// Delete the cloud-init ISO if it exists
-	cloudInitISOPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-cloud-init.iso", vmName))
+	cloudInitISOPath := filepath.Join(tempDir, fmt.Sprintf("%s-cloud-init.iso", vmName))
 	if err := os.Remove(cloudInitISOPath); err != nil && !os.IsNotExist(err) {
 		// Log but don't fail - this is just cleanup
 		fmt.Printf("Warning: failed to delete cloud-init ISO %s: %v\n", cloudInitISOPath, err)

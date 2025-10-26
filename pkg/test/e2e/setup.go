@@ -65,10 +65,11 @@ func SetupTestEnvironment(ctx context.Context, config SetupConfig) (*TestEnviron
 		return nil, fmt.Errorf("failed to create test environment: %w", err)
 	}
 
-	// Create the root temp directory: /tmp/e2e-<test-id>
+	// Create the root temp directory with marker file: /tmp/e2e-<test-id>
+	// The marker file ensures we only delete managed temp directories
 	tempDirRoot := filepath.Join(os.TempDir(), testEnv.ID)
-	if err := os.MkdirAll(tempDirRoot, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to create temp directory root: %w", err)
+	if _, err := CreateTempDirectory(tempDirRoot); err != nil {
+		return nil, fmt.Errorf("failed to create managed temp directory root: %w", err)
 	}
 	testEnv.TempDirRoot = tempDirRoot
 
@@ -120,6 +121,8 @@ func SetupTestEnvironment(ctx context.Context, config SetupConfig) (*TestEnviron
 		return nil, fmt.Errorf("failed to setup target VM: %w", err)
 	}
 	testEnv.TargetVM = *targetVM
+	// Track created files from target VM
+	testEnv.ManagedResources = append(testEnv.ManagedResources, targetVM.CreatedFiles...)
 
 	// Create git server VM (pass git server temp directory)
 	gitServerVM, err := setupGitServer(ctx, testEnv, imageCachePath, config.EdgeCDRepoPath, gitServerTempDir)
@@ -128,6 +131,8 @@ func SetupTestEnvironment(ctx context.Context, config SetupConfig) (*TestEnviron
 	}
 	testEnv.GitServerVM = *gitServerVM.VMMetadata
 	testEnv.GitSSHURLs = gitServerVM.GitSSHURLs
+	// Track created files from git server VM
+	testEnv.ManagedResources = append(testEnv.ManagedResources, gitServerVM.VMMetadata.CreatedFiles...)
 
 	// Backward compat: Track temp root directory (TempDirRoot is the primary tracker now)
 	// testEnv.TempDirs is deprecated but kept for backward compatibility

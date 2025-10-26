@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"text/tabwriter"
+	"time"
 
 	te2e "github.com/alexandremahdhaoui/edge-cd/pkg/test/e2e"
 )
@@ -267,19 +268,58 @@ func cmdDelete(ctx context.Context, artifactStoreDir string, testID string) {
 
 	fmt.Printf("Deleting test environment: %s\n", env.ID)
 
+	// Safety check: verify temp directory exists and is marked as managed
+	if env.TempDirRoot != "" {
+		fmt.Printf("  Validating temp directory: %s\n", env.TempDirRoot)
+		if !te2e.IsManagedTempDirectory(env.TempDirRoot) {
+			fmt.Fprintf(os.Stderr, "Warning: temp directory is not marked as managed (%s), proceeding with caution\n", env.TempDirRoot)
+		}
+	}
+
+	// Audit: log what will be deleted
+	if len(env.ManagedResources) > 0 {
+		fmt.Printf("  Deleting %d managed resources\n", len(env.ManagedResources))
+		for _, resource := range env.ManagedResources {
+			debugf("  - %s\n", resource)
+		}
+	}
+
 	// Use the reusable teardown function with logging
-	if err := te2e.TeardownTestEnvironmentWithLogging(ctx, env); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: encountered errors during cleanup: %v\n", err)
-	}
+	// Important: capture the error to determine if cleanup was successful
+	teardownErr := te2e.TeardownTestEnvironmentWithLogging(ctx, env)
 
-	// Delete from artifact store
-	if err := store.Delete(ctx, testID); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to delete environment from store: %v\n", err)
-	} else {
+	// Determine deletion strategy based on teardown success
+	if teardownErr == nil {
+		// SUCCESS: All cleanup operations completed without errors
+		// Safe to delete from artifact store
+		if err := store.Delete(ctx, testID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to delete environment from store: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Printf("  ✓ Environment removed from store\n")
-	}
+		fmt.Printf("\n✅ Test environment %s has been fully deleted\n", testID)
 
-	fmt.Printf("\n✅ Test environment %s has been deleted\n", testID)
+	} else {
+		// PARTIAL/COMPLETE FAILURE: Some cleanup operations failed
+		// Do NOT delete from artifact store, instead mark as partially_deleted
+		// so the user knows cleanup was incomplete
+		fmt.Fprintf(os.Stderr, "\n⚠️  Cleanup encountered errors. Marking environment as partially_deleted.\n")
+		fmt.Fprintf(os.Stderr, "Error details:\n%v\n", teardownErr)
+
+		env.Status = te2e.StatusPartiallyDeleted
+		env.UpdatedAt = time.Now()
+		if err := store.Save(ctx, env); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to update environment status: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("  ✓ Environment marked as %s in store\n", te2e.StatusPartiallyDeleted)
+		fmt.Printf("\n⚠️  Test environment %s marked as partially_deleted - cleanup had errors\n", testID)
+		fmt.Fprintf(os.Stderr, "Please review the errors above and manually clean up if necessary.\n")
+		fmt.Fprintf(os.Stderr, "To retry cleanup, run: edgectl-e2e delete %s\n", testID)
+
+		os.Exit(1)
+	}
 }
 
 // cmdGet displays complete information about a test environment

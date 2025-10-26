@@ -276,3 +276,107 @@ func TestVMMWithBaseDirOption(t *testing.T) {
 	}
 }
 
+// TestDomainExistsNonExistent tests DomainExists returns false for non-existent domain
+func TestDomainExistsNonExistent(t *testing.T) {
+	// Skip if libvirt not available
+	if os.Getenv("CI") == "true" && os.Getenv("LIBVIRT_TEST") != "true" {
+		t.Skip("Skipping libvirt test in CI without LIBVIRT_TEST=true")
+	}
+
+	vmm, err := vmm.NewVMM()
+	if err != nil {
+		t.Fatalf("Failed to create VMM: %v", err)
+	}
+	defer vmm.Close()
+
+	ctx := context.Background()
+
+	// Check for a domain that definitely doesn't exist
+	exists, err := vmm.DomainExists(ctx, "nonexistent-test-domain-12345")
+	if err != nil {
+		t.Fatalf("DomainExists should not error for non-existent domain: %v", err)
+	}
+
+	if exists {
+		t.Error("DomainExists should return false for non-existent domain")
+	}
+}
+
+// TestDomainExistsWithContextCancellation tests DomainExists respects context cancellation
+func TestDomainExistsWithContextCancellation(t *testing.T) {
+	// Skip if libvirt not available
+	if os.Getenv("CI") == "true" && os.Getenv("LIBVIRT_TEST") != "true" {
+		t.Skip("Skipping libvirt test in CI without LIBVIRT_TEST=true")
+	}
+
+	vmm, err := vmm.NewVMM()
+	if err != nil {
+		t.Fatalf("Failed to create VMM: %v", err)
+	}
+	defer vmm.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	exists, err := vmm.DomainExists(ctx, "test-domain")
+	if err != context.Canceled {
+		t.Errorf("Expected context.Canceled error, got %v", err)
+	}
+
+	if exists {
+		t.Error("DomainExists should return false when context cancelled")
+	}
+}
+
+// TestGetDomainByNameNonExistent tests GetDomainByName returns nil for non-existent domain
+func TestGetDomainByNameNonExistent(t *testing.T) {
+	// Skip if libvirt not available
+	if os.Getenv("CI") == "true" && os.Getenv("LIBVIRT_TEST") != "true" {
+		t.Skip("Skipping libvirt test in CI without LIBVIRT_TEST=true")
+	}
+
+	vmm, err := vmm.NewVMM()
+	if err != nil {
+		t.Fatalf("Failed to create VMM: %v", err)
+	}
+	defer vmm.Close()
+
+	ctx := context.Background()
+
+	// Get domain that doesn't exist - should return nil, not error (for idempotent cleanup)
+	dom, err := vmm.GetDomainByName(ctx, "nonexistent-test-domain-67890")
+	if err != nil {
+		t.Fatalf("GetDomainByName should not error for non-existent domain: %v", err)
+	}
+
+	if dom != nil {
+		t.Error("GetDomainByName should return nil for non-existent domain")
+	}
+}
+
+// TestGetDomainByNameWithContextCancellation tests GetDomainByName respects context cancellation
+func TestGetDomainByNameWithContextCancellation(t *testing.T) {
+	// Skip if libvirt not available
+	if os.Getenv("CI") == "true" && os.Getenv("LIBVIRT_TEST") != "true" {
+		t.Skip("Skipping libvirt test in CI without LIBVIRT_TEST=true")
+	}
+
+	vmm, err := vmm.NewVMM()
+	if err != nil {
+		t.Fatalf("Failed to create VMM: %v", err)
+	}
+	defer vmm.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	dom, err := vmm.GetDomainByName(ctx, "test-domain")
+	if err != context.Canceled {
+		t.Errorf("Expected context.Canceled error, got %v", err)
+	}
+
+	if dom != nil {
+		t.Error("GetDomainByName should return nil when context cancelled")
+	}
+}
+

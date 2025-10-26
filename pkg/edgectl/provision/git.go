@@ -35,82 +35,53 @@ func CloneOrPullRepoWithEnv(runner ssh.Runner, repoURL, destPath, env string) er
 //
 // This function properly composes both the prepend command and environment variables into the remote execution
 // via the CommandBuilder and SSH RunWithBuilder interface. No command string concatenation or environment stripping needed.
-func CloneOrPullRepoWithBranchAndEnv(runner ssh.Runner, repoURL, destPath, branch, env, prependCmd string) error {
+func CloneOrPullRepoWithBranchAndEnv(
+	runner ssh.Runner,
+	repoURL, destPath, branch, env, prependCmd string,
+) error {
+	var baseCmd, op string
 	// Check if repository already exists
 	checkCmd := fmt.Sprintf("[ -d %s ]", destPath)
 	_, _, err := runner.Run(checkCmd)
 	if err != nil { // Directory does not exist, so clone
 		// Build clone command
-		baseCmd := fmt.Sprintf("git clone -b %s %s %s", branch, repoURL, destPath)
-		builder := execution.NewCommandBuilder(baseCmd)
-
-		// Add optional prepend command (e.g., "sudo")
-		if prependCmd != "" {
-			builder.WithPrependCmd(prependCmd)
-		}
-
-		// Add optional environment variable (e.g., "GIT_SSH_COMMAND=...")
-		if env != "" {
-			envKey, envValue := parseEnvVar(env)
-			if envKey != "" {
-				builder.WithEnvironment(envKey, envValue)
-			}
-		}
-
-		fmt.Printf("Cloning repository %s (branch: %s) to %s...\n", repoURL, branch, destPath)
-
-		// Use BuilderRunner if available, otherwise fall back to regular Run
-		if builderRunner, ok := runner.(ssh.BuilderRunner); ok {
-			stdout, stderr, cloneErr := builderRunner.RunWithBuilder(builder)
-			if cloneErr != nil {
-				return fmt.Errorf(
-					"failed to clone repository %s (branch: %s): %w. Stdout: %s, Stderr: %s",
-					repoURL,
-					branch,
-					cloneErr,
-					stdout,
-					stderr,
-				)
-			}
-		} else {
-			// Fallback for non-BuilderRunner implementations
-			return fmt.Errorf("runner does not support BuilderRunner interface")
-		}
-
-		fmt.Printf("Successfully cloned repository %s (branch: %s).\n", repoURL, branch)
-	} else { // Directory exists, so pull
-		// Build pull command
-		baseCmd := fmt.Sprintf("git -C %s pull", destPath)
-		builder := execution.NewCommandBuilder(baseCmd)
-
-		// Add optional prepend command (e.g., "sudo")
-		if prependCmd != "" {
-			builder.WithPrependCmd(prependCmd)
-		}
-
-		// Add optional environment variable (e.g., "GIT_SSH_COMMAND=...")
-		if env != "" {
-			envKey, envValue := parseEnvVar(env)
-			if envKey != "" {
-				builder.WithEnvironment(envKey, envValue)
-			}
-		}
-
-		fmt.Printf("Pulling latest changes for repository %s in %s...\n", repoURL, destPath)
-
-		// Use BuilderRunner if available, otherwise fall back to regular Run
-		if builderRunner, ok := runner.(ssh.BuilderRunner); ok {
-			stdout, stderr, pullErr := builderRunner.RunWithBuilder(builder)
-			if pullErr != nil {
-				return fmt.Errorf("failed to pull repository %s: %w. Stdout: %s, Stderr: %s", repoURL, pullErr, stdout, stderr)
-			}
-		} else {
-			// Fallback for non-BuilderRunner implementations
-			return fmt.Errorf("runner does not support BuilderRunner interface")
-		}
-
-		fmt.Printf("Successfully pulled latest changes for repository %s.\n", repoURL)
+		baseCmd = fmt.Sprintf("git clone -b %s %s %s", branch, repoURL, destPath)
+		op = "clon"
+	} else {
+		// Directory exists, so pull
+		baseCmd = fmt.Sprintf("git -C %s pull", destPath)
+		op = "pull"
 	}
+
+	builder := execution.
+		NewCommandBuilder(baseCmd).
+		WithPrependCmd(prependCmd)
+
+	// Add optional environment variable (e.g., "GIT_SSH_COMMAND=...")
+	if env != "" {
+		envKey, envValue := parseEnvVar(env)
+		if envKey != "" {
+			builder.WithEnvironment(envKey, envValue)
+		}
+	}
+
+	fmt.Printf("%sing repository %s (branch: %s) to %s...\n", op, repoURL, branch, destPath)
+
+	// Use BuilderRunner if available, otherwise fall back to regular Run
+	stdout, stderr, cloneErr := runner.RunWithBuilder(builder)
+	if cloneErr != nil {
+		return fmt.Errorf(
+			"failed to %se repository %s (branch: %s): %w. Stdout: %s, Stderr: %s",
+			op,
+			repoURL,
+			branch,
+			cloneErr,
+			stdout,
+			stderr,
+		)
+	}
+
+	fmt.Printf("Successfully %sed repository %s (branch: %s).\n", op, repoURL, branch)
 
 	return nil
 }

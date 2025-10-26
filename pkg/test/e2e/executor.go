@@ -100,6 +100,8 @@ func ExecuteBootstrapTest(ctx context.Context, env *TestEnvironment, config Exec
 	remoteEdgeCDRepoDestPath := "/home/ubuntu/edge-cd"
 	remoteUserConfigRepoDestPath := "/home/ubuntu/edge-cd-config"
 
+	injectEnv := "GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
 	// Build bootstrap command
 	cmd := exec.Command(
 		config.EdgectlBinaryPath,
@@ -117,9 +119,7 @@ func ExecuteBootstrapTest(ctx context.Context, env *TestEnvironment, config Exec
 		"--edge-cd-repo-dest", remoteEdgeCDRepoDestPath,
 		"--user-config-repo-dest", remoteUserConfigRepoDestPath,
 		"--inject-prepend-cmd", "sudo",
-		"--inject-env", fmt.Sprintf(
-			"GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
-		),
+		"--inject-env", injectEnv,
 	)
 
 	// Set up environment for git operations
@@ -141,7 +141,12 @@ func ExecuteBootstrapTest(ctx context.Context, env *TestEnvironment, config Exec
 	}
 
 	// Verify bootstrap results
-	verifyErrors := verifyBootstrapResults(sshClient, remoteEdgeCDRepoDestPath, remoteUserConfigRepoDestPath, config.ServiceManager)
+	verifyErrors := verifyBootstrapResults(
+		sshClient,
+		remoteEdgeCDRepoDestPath,
+		remoteUserConfigRepoDestPath,
+		config.ServiceManager,
+	)
 	if len(verifyErrors) > 0 {
 		return fmt.Errorf("bootstrap verification failed: %v", verifyErrors)
 	}
@@ -153,7 +158,10 @@ func ExecuteBootstrapTest(ctx context.Context, env *TestEnvironment, config Exec
 }
 
 // verifyBootstrapResults checks that all expected files and services exist after bootstrap
-func verifyBootstrapResults(sshClient *ssh.Client, edgeCDRepoPath, userConfigRepoPath, serviceManager string) []error {
+func verifyBootstrapResults(
+	sshClient *ssh.Client,
+	edgeCDRepoPath, userConfigRepoPath, serviceManager string,
+) []error {
 	var errors []error
 
 	verifications := []struct {

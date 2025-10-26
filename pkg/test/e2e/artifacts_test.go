@@ -591,3 +591,33 @@ func BenchmarkListAll(b *testing.B) {
 		_, _ = store.ListAll(ctx)
 	}
 }
+
+// TestEnvironmentWithManagedResources verifies ManagedResources persistence
+func TestEnvironmentWithManagedResources(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "artifacts.json")
+	ctx := context.Background()
+
+	store := NewJSONArtifactStore(filePath)
+	env := &TestEnvironment{
+		ID:               "e2e-20231025-abc123",
+		Status:           "running",
+		ManagedResources: []string{},
+	}
+
+	// Add some resources
+	env.ManagedResources = append(env.ManagedResources, "/tmp/e2e-20231025-abc123/vmm/test-vm.qcow2")
+	env.ManagedResources = append(env.ManagedResources, "/tmp/e2e-20231025-abc123/vmm/test-vm-cloud-init.iso")
+	env.ManagedResources = append(env.ManagedResources, "/tmp/e2e-20231025-abc123/gitserver/id_rsa_gitserver")
+
+	err := store.Save(ctx, env)
+	require.NoError(t, err)
+
+	retrieved, err := store.Load(ctx, "e2e-20231025-abc123")
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, len(retrieved.ManagedResources))
+	assert.Contains(t, retrieved.ManagedResources, "/tmp/e2e-20231025-abc123/vmm/test-vm.qcow2")
+	assert.Contains(t, retrieved.ManagedResources, "/tmp/e2e-20231025-abc123/vmm/test-vm-cloud-init.iso")
+	assert.Contains(t, retrieved.ManagedResources, "/tmp/e2e-20231025-abc123/gitserver/id_rsa_gitserver")
+}

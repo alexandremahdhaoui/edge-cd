@@ -49,9 +49,11 @@ func (m *MockRunner) Run(cmd string) (stdout, stderr string, err error) {
 // RunWithBuilder records the command built from a CommandBuilder and returns a predefined response or a default.
 // It extracts the command string and environment variables from the builder and composes them into a full command string,
 // then delegates to Run() to record and return the response.
-func (m *MockRunner) RunWithBuilder(builder *execution.CommandBuilder) (stdout, stderr string, err error) {
+func (m *MockRunner) RunWithBuilder(
+	builder *execution.CommandBuilder,
+) (stdout, stderr string, err error) {
 	// Build the command to get the full command string and environment variables
-	builtCmd := builder.Build()
+	builtCmd := builder.BuildCmd()
 
 	// Extract the command string from the built command
 	// builtCmd.Args is ["sh", "-c", "actual_command_with_prepend"]
@@ -60,10 +62,10 @@ func (m *MockRunner) RunWithBuilder(builder *execution.CommandBuilder) (stdout, 
 	}
 	commandStr := builtCmd.Args[2]
 
-	// For the mock runner, we only need the command string itself
-	// The builder's environment variables are already in builtCmd.Env,
-	// but for test mocking purposes, we just use the command string
-	// as the tests set responses based on command strings, not env vars
+	// Note: We could use builder.GetEnvironmentVars() to get the environment variables
+	// and include them in the recorded command, but for mocking purposes, we keep it simple
+	// and just record the command string as-is. Tests set responses based on command patterns.
+	// The real SSH client (pkg/ssh/client.go) properly prepends environment variables.
 
 	// Delegate to Run() to record the command and return the response
 	return m.Run(commandStr)

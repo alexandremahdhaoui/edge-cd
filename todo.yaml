@@ -1,0 +1,12 @@
+- edgectl bootstrap GIT_SSH_COMMAND problem: |
+    The following block is not what we want:
+
+      ```go
+      // Prepare GIT_SSH_COMMAND for the remote git operations (gitSSHCmd already defined above)
+      gitsshEnv := fmt.Sprintf("GIT_SSH_COMMAND='%s'", gitSSHCmd)
+      // Merge with injected environment variables if provided
+      if *injectEnv != "" {
+        gitsshEnv = gitsshEnv + " " + *injectEnv
+      }
+      ```
+    We want to pass injectEnv directly, and we especially don't want to pass hardcoded GIT_SSH_COMMAND

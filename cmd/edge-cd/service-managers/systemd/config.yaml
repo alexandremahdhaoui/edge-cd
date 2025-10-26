@@ -1,10 +1,10 @@
 commands:
   # -- %s is replaced with prepend command (e.g., "sudo")
-  daemonReload: ["%s", "systemctl", "daemon-reload"]
-  unmask: ["%s", "systemctl", "unmask", "__SERVICE_NAME__"]
-  enable: ["%s", "systemctl", "enable", "__SERVICE_NAME__"]
-  restart: ["%s", "systemctl", "restart", "__SERVICE_NAME__"]
-  start: ["%s", "systemctl", "start", "__SERVICE_NAME__"]
+  daemonReload: ["systemctl", "daemon-reload"]
+  unmask: ["systemctl", "unmask", "__SERVICE_NAME__"]
+  enable: ["systemctl", "enable", "__SERVICE_NAME__"]
+  restart: ["systemctl", "restart", "__SERVICE_NAME__"]
+  start: ["systemctl", "start", "__SERVICE_NAME__"]
 
 # -- please note that the source path of the service must be:
 # "cmd/edge-cd/service-managers/SERVICE_MANAGER_NAME/service"

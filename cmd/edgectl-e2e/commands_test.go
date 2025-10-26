@@ -200,3 +200,84 @@ func TestTeardownPhases(t *testing.T) {
 		assert.NotEmpty(t, phase)
 	}
 }
+
+// TestDeleteCommandSafetyValidation tests that delete validates managed temp directories
+func TestDeleteCommandSafetyValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a managed temp directory
+	managedDir := filepath.Join(tmpDir, "e2e-20231025-managed")
+	managedTempPath, err := te2e.CreateTempDirectory(managedDir)
+	require.NoError(t, err)
+
+	// Create an unmanaged directory
+	unmanagedDir := filepath.Join(tmpDir, "e2e-20231025-unmanaged")
+	require.NoError(t, os.MkdirAll(unmanagedDir, 0755))
+
+	// Test that managed directory is detected
+	assert.True(t, te2e.IsManagedTempDirectory(managedTempPath))
+
+	// Test that unmanaged directory is not detected
+	assert.False(t, te2e.IsManagedTempDirectory(unmanagedDir))
+}
+
+// TestDeleteCommandTracksResources tests that delete tracks managed resources
+func TestDeleteCommandTracksResources(t *testing.T) {
+	tmpDir := t.TempDir()
+	storeFile := filepath.Join(tmpDir, "artifacts.json")
+
+	ctx := context.Background()
+	store := te2e.NewJSONArtifactStore(storeFile)
+
+	// Create a test environment with managed resources
+	env := &te2e.TestEnvironment{
+		ID:          "e2e-20231025-resources",
+		TempDirRoot: filepath.Join(tmpDir, "e2e-20231025-resources"),
+		Status:      "created",
+		CreatedAt:   time.Now().UTC(),
+		ManagedResources: []string{
+			"/tmp/e2e-20231025-resources/vmm/target.qcow2",
+			"/tmp/e2e-20231025-resources/vmm/target-cloud-init.iso",
+			"/tmp/e2e-20231025-resources/gitserver/gitserver-cloud-init.iso",
+		},
+	}
+
+	// Create the managed temp directory
+	_, err := te2e.CreateTempDirectory(env.TempDirRoot)
+	require.NoError(t, err)
+
+	// Save environment
+	require.NoError(t, store.Save(ctx, env))
+
+	// Load and verify managed resources are preserved
+	loaded, err := store.Load(ctx, env.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, len(loaded.ManagedResources))
+	assert.Contains(t, loaded.ManagedResources, "/tmp/e2e-20231025-resources/vmm/target.qcow2")
+	assert.Contains(t, loaded.ManagedResources, "/tmp/e2e-20231025-resources/vmm/target-cloud-init.iso")
+}
+
+// TestDeleteCommandValidatesTempDirStructure tests temp directory structure validation
+func TestDeleteCommandValidatesTempDirStructure(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a managed temp directory with proper structure
+	tempRoot := filepath.Join(tmpDir, "e2e-20231025-struct")
+	_, err := te2e.CreateTempDirectory(tempRoot)
+	require.NoError(t, err)
+
+	// Create subdirectories
+	for _, subdir := range []string{"vmm", "gitserver", "artifacts"} {
+		path := filepath.Join(tempRoot, subdir)
+		require.NoError(t, os.MkdirAll(path, 0755))
+	}
+
+	// Verify marker file exists
+	markerPath := filepath.Join(tempRoot, te2e.TempDirMarkerFile)
+	_, err = os.Stat(markerPath)
+	assert.NoError(t, err)
+
+	// Verify IsManagedTempDirectory detects it correctly
+	assert.True(t, te2e.IsManagedTempDirectory(tempRoot))
+}

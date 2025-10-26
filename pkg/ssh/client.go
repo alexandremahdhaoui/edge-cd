@@ -37,8 +37,10 @@ func NewClient(host, user, privateKeyPath, port string) (*Client, error) {
 		nil
 }
 
-// Run executes a command on the remote host via SSH.
-func (c *Client) Run(cmd string) (stdout, stderr string, err error) {
+func (c *Client) RunWithExecContext(
+	ctx execution.Context,
+	cmd string,
+) (stdout, stderr string, err error) {
 	signer, err := ssh.ParsePrivateKey(c.PrivateKey)
 	if err != nil {
 		return "", "", fmt.Errorf("unable to parse private key: %w", err)
@@ -77,15 +79,22 @@ func (c *Client) Run(cmd string) (stdout, stderr string, err error) {
 	return stdoutBuf.String(), stderrBuf.String(), nil
 }
 
+// Run executes a command on the remote host via SSH.
+func (c *Client) Run(cmd string) (stdout, stderr string, err error) {
+}
+
 // RunWithBuilder executes a command built with CommandBuilder on the remote host via SSH.
 // It properly injects both prepend commands and environment variables into the remote execution.
 //
 // The builder's command is constructed with a prepend prefix and environment variables.
-// This method extracts both and composes them into a proper SSH command:
-// "ENV1=val1 ENV2=val2 ... sh -c 'prepend_command base_command'"
-func (c *Client) RunWithBuilder(builder *execution.CommandBuilder) (stdout, stderr string, err error) {
+// For commands with "sudo" and environment variables, this method correctly composes them as:
+// "sudo env ENV1=val1 ENV2=val2 ... base_command"
+// This ensures environment variables are not stripped by sudo.
+func (c *Client) RunWithBuilder(
+	builder *execution.CommandBuilder,
+) (stdout, stderr string, err error) {
 	// Build the command to get the full command string and environment variables
-	builtCmd := builder.Build()
+	builtCmd := builder.BuildCmd()
 
 	// Extract the command string from the built command
 	// builtCmd.Args is ["sh", "-c", "actual_command_with_prepend"]
@@ -94,11 +103,23 @@ func (c *Client) RunWithBuilder(builder *execution.CommandBuilder) (stdout, stde
 	}
 	commandStr := builtCmd.Args[2]
 
-	// Extract environment variables added by the builder (not in os.Environ())
-	addedEnvVars := extractAddedEnvVars(builtCmd.Env)
+	// Get environment variables directly from the builder
+	// This ensures that explicitly-added environment variables are ALWAYS injected
+	// to the remote command, regardless of whether they're already in os.Environ()
+	builderEnvVars := builder.GetEnvironmentVars()
 
-	// Construct the full command with environment variables prefixed
-	fullCmd := composeSSHCommand(addedEnvVars, commandStr)
+	// Convert map to slice format for composing SSH command
+	var envVarsList []string
+	for key, value := range builderEnvVars {
+		envVarsList = append(envVarsList, fmt.Sprintf("%s=%s", key, value))
+	}
+
+	// Construct the full command with environment variables properly composed
+	// If there are environment variables and the command uses sudo, we must insert
+	// the env command after sudo to prevent sudo from stripping the variables:
+	// - Wrong: GIT_SSH_COMMAND=... sudo git clone ... (sudo strips GIT_SSH_COMMAND)
+	// - Right: sudo env GIT_SSH_COMMAND=... git clone ... (env preserves the variable)
+	fullCmd := composeSSHCommandWithSudoSupport(envVarsList, commandStr)
 
 	// Execute the command via SSH
 	return c.Run(fullCmd)
@@ -135,13 +156,48 @@ func extractAddedEnvVars(cmdEnv []string) []string {
 	return addedVars
 }
 
+// composeSSHCommandWithSudoSupport combines environment variables and a command into a single
+// SSH-executable command string, with proper handling for sudo.
+//
+// When "sudo" is present and environment variables are set, this function ensures the
+// environment variables are passed through the env command to prevent sudo from stripping them:
+// - Input: envVars=["GIT_SSH_COMMAND=..."], commandStr="sudo git clone ..."
+// - Output: "sudo env GIT_SSH_COMMAND='...' git clone ..."
+//
+// When no sudo is present, environment variables are prefixed normally:
+// - Input: envVars=["GIT_SSH_COMMAND=..."], commandStr="git clone ..."
+// - Output: "GIT_SSH_COMMAND='...' git clone ..."
+func composeSSHCommandWithSudoSupport(envVars []string, commandStr string) string {
+	if len(envVars) == 0 {
+		return commandStr
+	}
+
+	// Build the environment variable portion
+	var envPrefix strings.Builder
+	for _, envVar := range envVars {
+		parts := strings.SplitN(envVar, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := parts[0]
+		value := parts[1]
+
+		// Quote the value to handle spaces and special characters
+		quotedValue := fmt.Sprintf("'%s'", strings.ReplaceAll(value, "'", "'\\''"))
+		envPrefix.WriteString(fmt.Sprintf("%s=%s ", key, quotedValue))
+	}
+
+	return fmt.Sprintf("%s%s", envPrefix.String(), commandStr)
+}
+
 // composeSSHCommand combines environment variables and a command into a single
 // SSH-executable command string. Environment variables are prefixed to the command.
 //
 // Example:
-//   addedEnvVars: ["GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no"]
-//   commandStr: "sudo git clone https://example.com/repo /dest"
-//   Result: "GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no' sudo git clone https://example.com/repo /dest"
+//
+//	addedEnvVars: ["GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no"]
+//	commandStr: "sudo git clone https://example.com/repo /dest"
+//	Result: "GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no' sudo git clone https://example.com/repo /dest"
 func composeSSHCommand(addedEnvVars []string, commandStr string) string {
 	if len(addedEnvVars) == 0 {
 		return commandStr

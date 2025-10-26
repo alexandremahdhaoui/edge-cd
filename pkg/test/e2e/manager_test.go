@@ -514,6 +514,44 @@ func BenchmarkIDGeneration(b *testing.B) {
 	}
 }
 
+// TestManagedResourcesTracking verifies ManagedResources are properly initialized
+func TestManagedResourcesTracking(t *testing.T) {
+	manager := NewManager("/tmp/artifacts")
+	ctx := context.Background()
+
+	env, err := manager.CreateEnvironment(ctx)
+	require.NoError(t, err)
+
+	// ManagedResources should be initialized as empty slice
+	assert.NotNil(t, env.ManagedResources)
+	assert.Equal(t, 0, len(env.ManagedResources))
+}
+
+// TestManagedResourcesPersistence verifies ManagedResources can be updated and persisted
+func TestManagedResourcesPersistence(t *testing.T) {
+	manager := NewManager("/tmp/artifacts")
+	ctx := context.Background()
+
+	env, err := manager.CreateEnvironment(ctx)
+	require.NoError(t, err)
+
+	// Add some managed resources
+	env.ManagedResources = append(env.ManagedResources, "/tmp/e2e-xxx/vmm/disk.qcow2")
+	env.ManagedResources = append(env.ManagedResources, "/tmp/e2e-xxx/vmm/cloud-init.iso")
+
+	// Update environment
+	err = manager.UpdateEnvironment(ctx, env)
+	require.NoError(t, err)
+
+	// Retrieve and verify resources were persisted
+	retrieved, err := manager.GetEnvironment(ctx, env.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, len(retrieved.ManagedResources))
+	assert.Contains(t, retrieved.ManagedResources, "/tmp/e2e-xxx/vmm/disk.qcow2")
+	assert.Contains(t, retrieved.ManagedResources, "/tmp/e2e-xxx/vmm/cloud-init.iso")
+}
+
 // TestParseIDExtractsDate verifies that date can be extracted from ID
 func TestParseIDExtractsDate(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")

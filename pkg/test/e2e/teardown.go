@@ -43,9 +43,14 @@ func TeardownTestEnvironment(ctx context.Context, env *TestEnvironment) error {
 	}
 
 	// Clean up entire temp directory root (contains all component subdirs)
+	// Only remove if it's a managed temp directory (has marker file) for safety
 	if env.TempDirRoot != "" {
-		if err := os.RemoveAll(env.TempDirRoot); err != nil {
-			combinedErr = errors.Join(combinedErr, fmt.Errorf("failed to remove temp directory root: %w", err))
+		if IsManagedTempDirectory(env.TempDirRoot) {
+			if err := os.RemoveAll(env.TempDirRoot); err != nil {
+				combinedErr = errors.Join(combinedErr, fmt.Errorf("failed to remove temp directory root: %w", err))
+			}
+		} else {
+			combinedErr = errors.Join(combinedErr, fmt.Errorf("temp directory root is not marked as managed, skipping deletion: %s", env.TempDirRoot))
 		}
 	}
 
@@ -127,9 +132,14 @@ func TeardownTestEnvironmentWithLogging(ctx context.Context, env *TestEnvironmen
 	}
 
 	// Clean up entire temp directory root (contains all component subdirs)
+	// Only remove if it's a managed temp directory (has marker file) for safety
 	if env.TempDirRoot != "" {
 		fmt.Printf("Removing temp directory: %s\n", env.TempDirRoot)
-		if err := os.RemoveAll(env.TempDirRoot); err != nil {
+		if !IsManagedTempDirectory(env.TempDirRoot) {
+			err := fmt.Errorf("temp directory root is not marked as managed, skipping deletion: %s", env.TempDirRoot)
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+			combinedErr = errors.Join(combinedErr, err)
+		} else if err := os.RemoveAll(env.TempDirRoot); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to remove temp directory: %v\n", err)
 			combinedErr = errors.Join(combinedErr, err)
 		} else {

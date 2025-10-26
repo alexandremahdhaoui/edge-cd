@@ -19,7 +19,13 @@ type PackageManager struct {
 
 // LoadPackageManager reads a package manager's configuration from a local path.
 func LoadPackageManager(pkgMgr string, rootConfigsPath string) (*PackageManager, error) {
-	configPath := filepath.Join(rootConfigsPath, "cmd", "edge-cd", "package-managers", pkgMgr+".yaml")
+	configPath := filepath.Join(
+		rootConfigsPath,
+		"cmd",
+		"edge-cd",
+		"package-managers",
+		pkgMgr+".yaml",
+	)
 	yamlFile, err := ioutil.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read package manager config from %s: %w", configPath, err)
@@ -28,7 +34,11 @@ func LoadPackageManager(pkgMgr string, rootConfigsPath string) (*PackageManager,
 	var commands PackageManager
 	err = yaml.Unmarshal(yamlFile, &commands)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal package manager config from %s: %w", configPath, err)
+		return nil, fmt.Errorf(
+			"failed to unmarshal package manager config from %s: %w",
+			configPath,
+			err,
+		)
 	}
 
 	return &PackageManager{
@@ -38,14 +48,37 @@ func LoadPackageManager(pkgMgr string, rootConfigsPath string) (*PackageManager,
 }
 
 // ProvisionPackages installs a list of packages on the remote device.
-func ProvisionPackages(runner ssh.Runner, packages []string, pkgMgr string, localPkgMgrRepoPath string, remoteEdgeCDRepoURL string, remoteEdgeCDRepoDestPath string) error {
-	return ProvisionPackagesWithEnv(runner, packages, pkgMgr, localPkgMgrRepoPath, remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath, "")
+func ProvisionPackages(
+	runner ssh.Runner,
+	packages []string,
+	pkgMgr string,
+	localPkgMgrRepoPath string,
+	remoteEdgeCDRepoURL string,
+	remoteEdgeCDRepoDestPath string,
+) error {
+	return ProvisionPackagesWithEnv(
+		runner,
+		packages,
+		pkgMgr,
+		localPkgMgrRepoPath,
+		remoteEdgeCDRepoURL,
+		remoteEdgeCDRepoDestPath,
+		"",
+	)
 }
 
 // ProvisionPackagesWithEnv installs a list of packages on the remote device with optional environment variables.
 // The env parameter should be a complete environment variable assignment (e.g., "GIT_SSH_COMMAND=ssh -o...").
 // Environment variables are properly injected via the CommandBuilder.
-func ProvisionPackagesWithEnv(runner ssh.Runner, packages []string, pkgMgr string, localPkgMgrRepoPath string, remoteEdgeCDRepoURL string, remoteEdgeCDRepoDestPath string, env string) error {
+func ProvisionPackagesWithEnv(
+	runner ssh.Runner,
+	packages []string,
+	pkgMgr string,
+	localPkgMgrRepoPath string,
+	remoteEdgeCDRepoURL string,
+	remoteEdgeCDRepoDestPath string,
+	env string,
+) error {
 	// Load package manager configuration from the locally cloned repository
 	pm, err := LoadPackageManager(pkgMgr, localPkgMgrRepoPath)
 	if err != nil {
@@ -54,7 +87,8 @@ func ProvisionPackagesWithEnv(runner ssh.Runner, packages []string, pkgMgr strin
 
 	// Clone the edge-cd repository to its destination path on the remote device
 	baseCmd := fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath)
-	builder := execution.NewCommandBuilder(baseCmd)
+	builder := execution.
+		NewCommandBuilder(baseCmd)
 
 	// Add optional environment variable (e.g., "GIT_SSH_COMMAND=...")
 	if env != "" {
@@ -64,15 +98,21 @@ func ProvisionPackagesWithEnv(runner ssh.Runner, packages []string, pkgMgr strin
 		}
 	}
 
-	fmt.Printf("Cloning edge-cd repository %s to %s on remote...\n", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath)
+	fmt.Printf(
+		"Cloning edge-cd repository %s to %s on remote...\n",
+		remoteEdgeCDRepoURL,
+		remoteEdgeCDRepoDestPath,
+	)
 
 	// Use BuilderRunner if available, otherwise fall back to regular Run
-	if builderRunner, ok := runner.(ssh.BuilderRunner); ok {
-		if stdout, stderr, cloneErr := builderRunner.RunWithBuilder(builder); cloneErr != nil {
-			return fmt.Errorf("failed to clone edge-cd repository %s on remote: %w. Stdout: %s, Stderr: %s", remoteEdgeCDRepoURL, cloneErr, stdout, stderr)
-		}
-	} else {
-		return fmt.Errorf("runner does not support BuilderRunner interface")
+	if stdout, stderr, cloneErr := runner.RunWithBuilder(builder); cloneErr != nil {
+		return fmt.Errorf(
+			"failed to clone edge-cd repository %s on remote: %w. Stdout: %s, Stderr: %s",
+			remoteEdgeCDRepoURL,
+			cloneErr,
+			stdout,
+			stderr,
+		)
 	}
 
 	// Update package manager repos once
@@ -80,7 +120,12 @@ func ProvisionPackagesWithEnv(runner ssh.Runner, packages []string, pkgMgr strin
 		updateCmdStr := strings.Join(pm.Update, " ")
 		fmt.Printf("Updating package manager using %s...\n", pkgMgr)
 		if stdout, stderr, updateErr := runner.Run(updateCmdStr); updateErr != nil {
-			return fmt.Errorf("failed to update package manager: %w. Stdout: %s, Stderr: %s", updateErr, stdout, stderr)
+			return fmt.Errorf(
+				"failed to update package manager: %w. Stdout: %s, Stderr: %s",
+				updateErr,
+				stdout,
+				stderr,
+			)
 		}
 	}
 
@@ -90,7 +135,12 @@ func ProvisionPackagesWithEnv(runner ssh.Runner, packages []string, pkgMgr strin
 		installCmdStr := strings.Join(installCmdSlice, " ")
 		fmt.Printf("Installing packages using %s...\n", pkgMgr)
 		if stdout, stderr, installErr := runner.Run(installCmdStr); installErr != nil {
-			return fmt.Errorf("failed to install packages: %w. Stdout: %s, Stderr: %s", installErr, stdout, stderr)
+			return fmt.Errorf(
+				"failed to install packages: %w. Stdout: %s, Stderr: %s",
+				installErr,
+				stdout,
+				stderr,
+			)
 		}
 	}
 

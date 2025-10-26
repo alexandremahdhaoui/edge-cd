@@ -17,12 +17,6 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 )
 
-//go:embed Dockerfile
-var Dockerfile string
-
-//go:embed entrypoint.sh
-var Entrypoint string
-
 type SourceType int
 
 const (
@@ -99,7 +93,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	var err error
-	s.vmm, err = vmm.NewVMM()
+	s.vmm, err = vmm.NewVMM(vmm.WithBaseDir(s.tempDir))
 	if err != nil {
 		return fmt.Errorf("failed to create VMM: %v", err)
 	}
@@ -143,14 +137,6 @@ func (s *Server) Run(ctx context.Context) error {
 				repo.Name,
 			)
 			s.gitSSHUrls[repo.Name] = repoURL
-		}
-	}
-
-	// Set git-shell after repos are initialized (if we have repos)
-	if len(s.Repo) > 0 {
-		sshClient, err := s.sshClient()
-		if err == nil {
-			sshClient.Run("chsh -s /usr/bin/git-shell git")
 		}
 	}
 
@@ -259,6 +245,8 @@ func (s *Server) initVM() error {
 
 	// 3. Populate s.vmConfig
 	s.vmConfig = vmm.NewVMConfig(s.name, s.imageQCOW2Path, userData)
+	// Set temp directory for VM artifacts (disk, ISO files)
+	s.vmConfig.TempDir = s.tempDir
 
 	return nil
 }
@@ -375,12 +363,9 @@ func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string
 	remoteURL := fmt.Sprintf("ssh://git@%s:%d/srv/git/%s.git", s.vmIPAddress, s.SSHPort, repoName)
 
 	// Remove existing origin remote if it exists
-	var cmd *exec.Cmd
-	cmd = exec.Command("git", "remote", "remove", "origin")
+	cmd := exec.Command("git", "remote", "remove", "origin")
 	cmd.Dir = tempRepoDirPath
-	if _, err := cmd.CombinedOutput(); err != nil {
-		// ignore errors, remote might not exist
-	}
+	_ = cmd.Run()
 
 	// Add new remote
 	cmd = exec.Command("git", "remote", "add", "origin", remoteURL)
@@ -392,15 +377,11 @@ func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string
 	// Commit any uncommitted changes
 	cmd = exec.Command("git", "add", ".")
 	cmd.Dir = tempRepoDirPath
-	if _, err := cmd.CombinedOutput(); err != nil {
-		// ignore errors, files might already be added
-	}
+	_ = cmd.Run()
 
 	cmd = exec.Command("git", "commit", "-m", "Sync from source", "--allow-empty")
 	cmd.Dir = tempRepoDirPath
-	if _, err := cmd.CombinedOutput(); err != nil {
-		// ignore errors, might have no changes
-	}
+	_ = cmd.Run()
 
 	// Push to the server
 	cmd = exec.Command("git", "push", "-u", "origin", "HEAD")

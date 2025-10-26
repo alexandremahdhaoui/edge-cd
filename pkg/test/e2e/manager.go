@@ -11,20 +11,31 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 )
 
+// Status constants for test environments
+const (
+	StatusCreated           = "created"
+	StatusSetup             = "setup"
+	StatusRunning           = "running"
+	StatusPassed            = "passed"
+	StatusFailed            = "failed"
+	StatusPartiallyDeleted  = "partially_deleted"
+)
+
 // TestEnvironment represents a complete test execution context
 type TestEnvironment struct {
-	ID            string            // Unique identifier (e.g., "e2e-20231025-abc123")
-	CreatedAt     time.Time         // When the environment was created
-	UpdatedAt     time.Time         // Last time environment was updated
-	TargetVM      vmm.VMMetadata    // Target VM being tested
-	GitServerVM   vmm.VMMetadata    // Git server VM for config repos
-	ArtifactPath  string            // Root directory for all test artifacts
-	TempDirRoot   string            // Root temp directory: /tmp/e2e-<test-id>. All component subdirs created here
-	SSHKeys       SSHKeyInfo        // Paths to SSH keys used in this environment
-	Status        string            // Current status: "setup", "running", "passed", "failed", "cleanup"
-	Notes         string            // Optional notes for this environment
-	GitSSHURLs    map[string]string // Git repository SSH URLs, keyed by repo name
-	TempDirs      []string          // Deprecated: kept for backward compatibility. Use TempDirRoot instead.
+	ID               string            // Unique identifier (e.g., "e2e-20231025-abc123")
+	CreatedAt        time.Time         // When the environment was created
+	UpdatedAt        time.Time         // Last time environment was updated
+	TargetVM         vmm.VMMetadata    // Target VM being tested
+	GitServerVM      vmm.VMMetadata    // Git server VM for config repos
+	ArtifactPath     string            // Root directory for all test artifacts
+	TempDirRoot      string            // Root temp directory: /tmp/e2e-<test-id>. All component subdirs created here
+	SSHKeys          SSHKeyInfo        // Paths to SSH keys used in this environment
+	Status           string            // Current status: "setup", "running", "passed", "failed", "cleanup"
+	Notes            string            // Optional notes for this environment
+	GitSSHURLs       map[string]string // Git repository SSH URLs, keyed by repo name
+	ManagedResources []string          // List of files/directories created during test (for audit and cleanup)
+	TempDirs         []string          // Deprecated: kept for backward compatibility. Use TempDirRoot instead.
 }
 
 // SSHKeyInfo stores paths to SSH key files
@@ -118,11 +129,12 @@ func (m *Manager) CreateEnvironment(ctx context.Context) (*TestEnvironment, erro
 	}
 
 	env := &TestEnvironment{
-		ID:         id,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		Status:     "setup",
-		GitSSHURLs: make(map[string]string),
+		ID:               id,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		Status:           "setup",
+		GitSSHURLs:       make(map[string]string),
+		ManagedResources: make([]string, 0),
 	}
 
 	m.environments[id] = env
