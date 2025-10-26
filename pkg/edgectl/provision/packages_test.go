@@ -18,11 +18,17 @@ func TestProvisionPackages(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Create the package-managers directory structure
+	pkgMgrDir := filepath.Join(tmpDir, "cmd", "edge-cd", "package-managers")
+	if err := os.MkdirAll(pkgMgrDir, 0o755); err != nil {
+		t.Fatalf("Failed to create package-managers dir: %v", err)
+	}
+
 	aptYaml := `
 update: ["apt-get", "update"]
 install: ["apt-get", "install", "-y"]
 `
-	if err := ioutil.WriteFile(filepath.Join(tmpDir, "apt.yaml"), []byte(aptYaml), 0o644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(pkgMgrDir, "apt.yaml"), []byte(aptYaml), 0o644); err != nil {
 		t.Fatalf("Failed to write apt.yaml: %v", err)
 	}
 

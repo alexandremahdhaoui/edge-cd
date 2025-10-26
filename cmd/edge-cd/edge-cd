@@ -57,6 +57,8 @@ __DEFAULT_EDGE_CD_REPO_URL=https://github.com/alexandremahdhaoui/edge-cd.git
 __DEFAULT_EDGE_CD_COMMIT_PATH=/tmp/edge-cd/edge-cd-last-synchronized-commit.txt
 __DEFAULT_CONFIG_COMMIT_PATH=/tmp/edge-cd/config-last-synchronized-commit.txt
 
+__DEFAULT_CONFIG_REPO_BRANCH=main
+__DEFAULT_CONFIG_REPO_URL=
 __DEFAULT_CONFIG_REPO_DESTINATION_PATH=/usr/local/src/edge-cd-config
 
 function declare_config() {

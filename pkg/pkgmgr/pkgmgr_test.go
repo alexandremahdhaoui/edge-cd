@@ -14,40 +14,45 @@ func TestInstallPackages(t *testing.T) {
 	packages := []string{"git", "yq"}
 
 	// Test new install
+	mockRunner.SetResponse("opkg update", "", "", nil)
 	mockRunner.SetResponse(
 		"opkg list-installed | grep -q '^git '",
 		"",
 		"",
 		errors.New("exit status 1"),
 	) // Not installed
-	mockRunner.SetResponse("opkg update && opkg install git", "", "", nil)
+	mockRunner.SetResponse("opkg install git", "", "", nil)
 	mockRunner.SetResponse(
 		"opkg list-installed | grep -q '^yq '",
 		"",
 		"",
 		errors.New("exit status 1"),
 	) // Not installed
-	mockRunner.SetResponse("opkg update && opkg install yq", "", "", nil)
+	mockRunner.SetResponse("opkg install yq", "", "", nil)
 
 	err := pkgmgr.InstallPackages(mockRunner, packages)
 	if err != nil {
 		t.Errorf("Expected no error on new install, got %v", err)
 	}
-	if err := mockRunner.AssertCommandRun("opkg list-installed | grep -q '^git ' "); err != nil {
+	if err := mockRunner.AssertCommandRun("opkg update"); err != nil {
 		t.Error(err)
 	}
-	if err := mockRunner.AssertCommandRun("opkg update && opkg install git"); err != nil {
+	if err := mockRunner.AssertCommandRun("opkg list-installed | grep -q '^git '"); err != nil {
 		t.Error(err)
 	}
-	if err := mockRunner.AssertCommandRun("opkg list-installed | grep -q '^yq ' "); err != nil {
+	if err := mockRunner.AssertCommandRun("opkg install git"); err != nil {
 		t.Error(err)
 	}
-	if err := mockRunner.AssertCommandRun("opkg update && opkg install yq"); err != nil {
+	if err := mockRunner.AssertCommandRun("opkg list-installed | grep -q '^yq '"); err != nil {
+		t.Error(err)
+	}
+	if err := mockRunner.AssertCommandRun("opkg install yq"); err != nil {
 		t.Error(err)
 	}
 
 	// Test existing install (idempotency)
 	mockRunner = ssh.NewMockRunner() // Reset mock
+	mockRunner.SetResponse("opkg update", "", "", nil)
 	mockRunner.SetResponse(
 		"opkg list-installed | grep -q '^git '",
 		"git - 2.34.1-1\n",
@@ -60,28 +65,32 @@ func TestInstallPackages(t *testing.T) {
 		"",
 		errors.New("exit status 1"),
 	) // Not installed
-	mockRunner.SetResponse("opkg update && opkg install yq", "", "", nil)
+	mockRunner.SetResponse("opkg install yq", "", "", nil)
 
 	err = pkgmgr.InstallPackages(mockRunner, packages)
 	if err != nil {
 		t.Errorf("Expected no error on existing install, got %v", err)
 	}
-	if err := mockRunner.AssertCommandRun("opkg list-installed | grep -q '^git ' "); err != nil {
+	if err := mockRunner.AssertCommandRun("opkg update"); err != nil {
+		t.Error(err)
+	}
+	if err := mockRunner.AssertCommandRun("opkg list-installed | grep -q '^git '"); err != nil {
 		t.Error(err)
 	}
 	// The following command should NOT be run, so we assert it was NOT run.
-	if err := mockRunner.AssertCommandRun("opkg update && opkg install git"); err == nil {
-		t.Error("Expected 'opkg update && opkg install git' not to be run for existing package")
+	if err := mockRunner.AssertCommandRun("opkg install git"); err == nil {
+		t.Error("Expected 'opkg install git' not to be run for existing package")
 	}
-	if err := mockRunner.AssertCommandRun("opkg list-installed | grep -q '^yq ' "); err != nil {
+	if err := mockRunner.AssertCommandRun("opkg list-installed | grep -q '^yq '"); err != nil {
 		t.Error(err)
 	}
-	if err := mockRunner.AssertCommandRun("opkg update && opkg install yq"); err != nil {
+	if err := mockRunner.AssertCommandRun("opkg install yq"); err != nil {
 		t.Error(err)
 	}
 
 	// Test installation failure
 	mockRunner = ssh.NewMockRunner() // Reset mock
+	mockRunner.SetResponse("opkg update", "", "", nil)
 	mockRunner.SetResponse(
 		"opkg list-installed | grep -q '^git '",
 		"",
@@ -89,7 +98,7 @@ func TestInstallPackages(t *testing.T) {
 		errors.New("exit status 1"),
 	) // Not installed
 	mockRunner.SetResponse(
-		"opkg update && opkg install git",
+		"opkg install git",
 		"",
 		"Error installing git\n",
 		errors.New("exit status 1"),
@@ -99,7 +108,7 @@ func TestInstallPackages(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error on installation failure, got nil")
 	}
-	if !strings.Contains(err.Error(), "failed to install package git") {
+	if err != nil && !strings.Contains(err.Error(), "failed to install package git") {
 		t.Errorf("Expected specific error message, got %v", err)
 	}
 }
