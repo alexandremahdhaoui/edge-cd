@@ -24,10 +24,10 @@ type ServiceManagerConfig struct {
 func SetupEdgeCDService(
 	execCtx execcontext.Context,
 	runner ssh.Runner,
-	serviceManagerName, edgeCDRepoPath string,
+	svcmgrName, edgeCDRepoPath string,
 ) error {
 	// Load the service manager configuration
-	config, err := loadServiceManagerConfig(edgeCDRepoPath, serviceManagerName)
+	config, err := loadServiceManagerConfig(edgeCDRepoPath, svcmgrName)
 	if err != nil {
 		return err
 	}
@@ -38,15 +38,14 @@ func SetupEdgeCDService(
 		"cmd",
 		"edge-cd",
 		"service-managers",
-		serviceManagerName,
-		fmt.Sprintf("edge-cd.%s", serviceManagerName),
+		svcmgrName,
+		fmt.Sprintf("edge-cd.%s", svcmgrName),
 	)
 	serviceDestPath := config.EdgeCDService.DestinationPath
 
 	// Copy service file to destination using the context
-	copyCmd := fmt.Sprintf("cp %s %s", serviceSourcePath, serviceDestPath)
 	fmt.Printf("Copying service file from %s to %s...\n", serviceSourcePath, serviceDestPath)
-	stdout, stderr, err := runner.Run(execCtx, copyCmd)
+	stdout, stderr, err := runner.Run(execCtx, "cp", serviceSourcePath, serviceDestPath)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to copy service file: %w. Stdout: %s, Stderr: %s",
@@ -57,9 +56,9 @@ func SetupEdgeCDService(
 	}
 
 	// Build and execute enable command
-	enableCmd := buildCommand(config.Commands["enable"], "", "edge-cd")
-	fmt.Printf("Enabling service %s...\n", serviceManagerName)
-	stdout, stderr, err = runner.Run(execCtx, enableCmd)
+	enableCmdRaw := substituteServiceName(config.Commands["enable"], "edge-cd")
+	fmt.Printf("Enabling service %s...\n", svcmgrName)
+	stdout, stderr, err = runner.Run(execCtx, enableCmdRaw...)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to enable service: %w. Stdout: %s, Stderr: %s",
@@ -70,17 +69,17 @@ func SetupEdgeCDService(
 	}
 
 	// Build and execute start command (fallback to restart if start doesn't exist)
-	var startCmd string
+	var startCmdRaw []string
 	if len(config.Commands["start"]) > 0 {
-		startCmd = buildCommand(config.Commands["start"], "", "edge-cd")
+		startCmdRaw = substituteServiceName(config.Commands["start"], "edge-cd")
 	} else if len(config.Commands["restart"]) > 0 {
 		// Some service managers (like procd) use restart instead of start
-		startCmd = buildCommand(config.Commands["restart"], "", "edge-cd")
+		startCmdRaw = substituteServiceName(config.Commands["restart"], "edge-cd")
 	}
 
-	if startCmd != "" {
-		fmt.Printf("Starting service %s...\n", serviceManagerName)
-		stdout, stderr, err = runner.Run(execCtx, startCmd)
+	if len(startCmdRaw) > 0 {
+		fmt.Printf("Starting service %s...\n", svcmgrName)
+		stdout, stderr, err = runner.Run(execCtx, startCmdRaw...)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to start service: %w. Stdout: %s, Stderr: %s",
@@ -120,26 +119,11 @@ func loadServiceManagerConfig(
 	return &config, nil
 }
 
-// buildCommand constructs a command from a command pattern array.
-// Replaces "__SERVICE_NAME__" with serviceName throughout the command parts.
-// Returns a properly formatted command string.
-func buildCommand(cmdPattern []string, _ string, serviceName string) string {
-	if len(cmdPattern) == 0 {
-		return ""
+// substituteServiceName replaces "__SERVICE_NAME__" placeholder in command arguments
+func substituteServiceName(cmdArgs []string, serviceName string) []string {
+	result := make([]string, len(cmdArgs))
+	for i, arg := range cmdArgs {
+		result[i] = strings.ReplaceAll(arg, "__SERVICE_NAME__", serviceName)
 	}
-
-	// Build the command, replacing placeholders
-	var parts []string
-	for _, part := range cmdPattern {
-		if part == "%s" {
-			// Skip the prepend placeholder - prepend is handled via execution.Context
-			continue
-		} else {
-			// Replace __SERVICE_NAME__ placeholder within the string
-			replacedPart := strings.ReplaceAll(part, "__SERVICE_NAME__", serviceName)
-			parts = append(parts, replacedPart)
-		}
-	}
-
-	return strings.Join(parts, " ")
+	return result
 }

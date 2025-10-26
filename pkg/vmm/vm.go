@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/cloudinit"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"libvirt.org/go/libvirt"
 	"libvirt.org/go/libvirtxml"
 )
@@ -335,7 +336,8 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 	}
 
 	// Get the VM's IP address with retry logic
-	ipAddress, err := v.GetDomainIP(context.Background(), cfg.Name, 60*time.Second)
+	execCtx := execcontext.New(make(map[string]string), []string{})
+	ipAddress, err := v.GetDomainIP(execCtx, cfg.Name, 60*time.Second)
 	if err != nil {
 		// Log but don't fail - IP might not be available immediately
 		fmt.Printf("Warning: failed to get IP for VM %s: %v\n", cfg.Name, err)
@@ -363,12 +365,7 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 // DomainExists checks if a VM domain exists in libvirt.
 // First checks the in-memory domains map for efficiency.
 // If not found in memory, queries libvirt directly (critical for cleanup when using new VMM instances).
-func (v *VMM) DomainExists(ctx context.Context, name string) (bool, error) {
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	default:
-	}
+func (v *VMM) DomainExists(ctx execcontext.Context, name string) (bool, error) {
 
 	// Check in-memory map first (optimization)
 	dom, ok := v.domains[name]
@@ -404,12 +401,7 @@ func (v *VMM) DomainExists(ctx context.Context, name string) (bool, error) {
 
 // GetDomainIP retrieves the IP address of a running VM
 // Polls with backoff up to the specified timeout duration
-func (v *VMM) GetDomainIP(ctx context.Context, name string, timeout time.Duration) (string, error) {
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
-	}
+func (v *VMM) GetDomainIP(ctx execcontext.Context, name string, timeout time.Duration) (string, error) {
 
 	dom, ok := v.domains[name]
 	if !ok || dom == nil {
@@ -422,12 +414,6 @@ func (v *VMM) GetDomainIP(ctx context.Context, name string, timeout time.Duratio
 	maxBackoff := 30 * time.Second
 
 	for {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		default:
-		}
-
 		if time.Now().After(deadline) {
 			return "", fmt.Errorf("timed out waiting for VM %s IP address", name)
 		}
@@ -455,22 +441,12 @@ func (v *VMM) GetDomainIP(ctx context.Context, name string, timeout time.Duratio
 			}
 		}
 
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(waitTime):
-			// Continue to next iteration
-		}
+		time.Sleep(waitTime)
 	}
 }
 
 // GetDomainXML returns the full XML definition of a domain
-func (v *VMM) GetDomainXML(ctx context.Context, name string) (string, error) {
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
-	}
+func (v *VMM) GetDomainXML(ctx execcontext.Context, name string) (string, error) {
 
 	dom, ok := v.domains[name]
 	if !ok || dom == nil {
@@ -488,12 +464,7 @@ func (v *VMM) GetDomainXML(ctx context.Context, name string) (string, error) {
 // GetDomainByName gets a domain handle by name, checking memory first then querying libvirt
 // This helper function supports cleanup scenarios where a new VMM instance is created
 // Returns nil if domain does not exist (allows idempotent cleanup)
-func (v *VMM) GetDomainByName(ctx context.Context, name string) (*libvirt.Domain, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
+func (v *VMM) GetDomainByName(ctx execcontext.Context, name string) (*libvirt.Domain, error) {
 
 	// Check in-memory map first (optimization)
 	if dom, ok := v.domains[name]; ok && dom != nil {
@@ -522,12 +493,7 @@ func (v *VMM) GetDomainByName(ctx context.Context, name string) (*libvirt.Domain
 // DestroyVM destroys a virtual machine and deletes its storage unconditionally
 // This stops the VM, undefines it in libvirt, and deletes its disk files
 // Caller is responsible for deciding whether to call this
-func (v *VMM) DestroyVM(ctx context.Context, vmName string) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
+func (v *VMM) DestroyVM(ctx execcontext.Context, vmName string) error {
 
 	// Get domain handle (checks memory first, then queries libvirt)
 	// GetDomainByName returns nil if domain doesn't exist (for idempotent cleanup)

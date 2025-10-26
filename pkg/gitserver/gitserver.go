@@ -1,7 +1,6 @@
 package gitserver
 
 import (
-	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -54,7 +53,6 @@ type Server struct {
 	imageQCOW2Path string            // Path to the base QCOW2 image for the VM
 	gitSSHUrls     map[string]string // Repository name -> SSH URL mapping
 
-	// -- Docker related fields (to be removed later)
 	authorizedKeysFile string
 	buildDir           string
 	gitDir             string
@@ -77,13 +75,9 @@ func NewServer(baseDir, imageQCOW2Path string, repo []Repo) *Server {
 // Run creates and starts the git server VM.
 // Accepts context for cancellation support.
 // After successful Run(), call Status() to get complete server information.
-func (s *Server) Run(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
+func (s *Server) Run(
+	execCtx execcontext.Context,
+) error {
 	// Initialize base directories first
 	if err := s.init(); err != nil {
 		return fmt.Errorf("failed to initialize directories: %v", err)
@@ -125,7 +119,7 @@ func (s *Server) Run(ctx context.Context) error {
 			if repo.Source.Type != LocalSource {
 				return fmt.Errorf("unsupported repo source type for repo %s", repo.Name)
 			}
-			if err := s.initAndPushRepo(sshClient, repo.Name, repo.Source.LocalPath); err != nil {
+			if err := s.initAndPushRepo(execCtx, sshClient, repo.Name, repo.Source.LocalPath); err != nil {
 				return fmt.Errorf("failed to init and push repo %s: %w", repo.Name, err)
 			}
 
@@ -258,9 +252,9 @@ func (s *Server) Teardown() error {
 	}
 
 	var errs error
-	// Use background context for teardown (not critical if cancellation happens)
-	ctx := context.Background()
-	if err := s.vmm.DestroyVM(ctx, s.vmConfig.Name); err != nil {
+	// Use empty execcontext for teardown
+	execCtx := execcontext.New(make(map[string]string), []string{})
+	if err := s.vmm.DestroyVM(execCtx, s.vmConfig.Name); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("failed to destroy VM: %w", err))
 	}
 
@@ -299,11 +293,20 @@ func (s *Server) sshClient() (*ssh.Client, error) {
 	return sshClient, nil
 }
 
-func (s *Server) initAndPushRepo(sshClient *ssh.Client, repoName, srcPath string) error {
-	// Initialize a bare Git repository on the server with main as default branch
-	initCmd := fmt.Sprintf("git init -b main --bare /srv/git/%s.git", repoName)
-	ctx := execcontext.New(make(map[string]string), []string{})
-	if stdout, stderr, err := sshClient.Run(ctx, initCmd); err != nil {
+func (s *Server) initAndPushRepo(
+	execCtx execcontext.Context,
+	sshClient *ssh.Client,
+	repoName, srcPath string,
+) error {
+	if stdout, stderr, err := sshClient.Run(
+		execCtx,
+		"git",
+		"init",
+		"-b",
+		"main",
+		"--bare",
+		fmt.Sprintf("/srv/git/%s.git", repoName),
+	); err != nil {
 		return fmt.Errorf(
 			"failed to initialize bare repository on Git server: stdout=%s; stderr=%s; %w",
 			stdout, stderr, err,

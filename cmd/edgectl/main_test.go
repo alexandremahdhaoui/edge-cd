@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"testing"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/edgectl/provision"
@@ -13,18 +12,25 @@ import (
 // TestCloneOrPullRepoWithInjectEnvEmpty verifies that CloneOrPullRepoWithBranchAndEnv handles empty env
 func TestCloneOrPullRepoWithInjectEnvEmpty(t *testing.T) {
 	mockRunner := ssh.NewMockRunner()
-	mockRunner.SetResponse("git clone -b main https://github.com/test/config.git /tmp/config-repo", "", "", nil)
+	mockRunner.SetResponse(
+		"git clone -b main https://github.com/test/config.git /tmp/config-repo",
+		"",
+		"",
+		nil,
+	)
 
 	// Create context with empty environment variables
 	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Call with empty env (no --inject-env flag)
-	err := provision.CloneOrPullRepoWithBranchAndEnv(
+	err := provision.CloneOrPullRepo(
 		ctx,
 		mockRunner,
-		"https://github.com/test/config.git",
 		"/tmp/config-repo",
-		"main",
+		provision.GitRepo{
+			URL:    "https://github.com/test/config.git",
+			Branch: "main",
+		},
 	)
 
 	// The function should attempt to execute without failing on empty env
@@ -34,7 +40,12 @@ func TestCloneOrPullRepoWithInjectEnvEmpty(t *testing.T) {
 // TestCloneOrPullRepoWithInjectEnvSet verifies that CloneOrPullRepoWithBranchAndEnv handles populated env
 func TestCloneOrPullRepoWithInjectEnvSet(t *testing.T) {
 	mockRunner := ssh.NewMockRunner()
-	mockRunner.SetResponse("GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no' git clone -b main https://github.com/test/config.git /tmp/config-repo", "", "", nil)
+	mockRunner.SetResponse(
+		"GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no' git clone -b main https://github.com/test/config.git /tmp/config-repo",
+		"",
+		"",
+		nil,
+	)
 
 	// Create context with environment variables
 	envs := make(map[string]string)
@@ -42,12 +53,14 @@ func TestCloneOrPullRepoWithInjectEnvSet(t *testing.T) {
 	ctx := execcontext.New(envs, []string{})
 
 	// Call with env set
-	err := provision.CloneOrPullRepoWithBranchAndEnv(
+	err := provision.CloneOrPullRepo(
 		ctx,
 		mockRunner,
-		"https://github.com/test/config.git",
 		"/tmp/config-repo",
-		"main",
+		provision.GitRepo{
+			URL:    "https://github.com/test/config.git",
+			Branch: "main",
+		},
 	)
 
 	// The function should attempt to execute without failing on populated env
@@ -61,17 +74,24 @@ func TestBootstrapCommandWithoutInjectEnv(t *testing.T) {
 	// We verify this by testing CloneOrPullRepoWithBranchAndEnv with empty env.
 
 	mockRunner := ssh.NewMockRunner()
-	mockRunner.SetResponse("git clone -b main https://github.com/test/config.git /tmp/config-repo", "", "", nil)
+	mockRunner.SetResponse(
+		"git clone -b main https://github.com/test/config.git /tmp/config-repo",
+		"",
+		"",
+		nil,
+	)
 
 	// When --inject-env is not provided, create context with empty env
 	ctx := execcontext.New(make(map[string]string), []string{})
 
-	err := provision.CloneOrPullRepoWithBranchAndEnv(
+	err := provision.CloneOrPullRepo(
 		ctx,
 		mockRunner,
-		"https://github.com/test/config.git",
 		"/tmp/config-repo",
-		"main",
+		provision.GitRepo{
+			URL:    "https://github.com/test/config.git",
+			Branch: "main",
+		},
 	)
 
 	assert.NoError(t, err, "bootstrap should work without --inject-env flag")
@@ -83,19 +103,26 @@ func TestBootstrapCommandWithInjectEnv(t *testing.T) {
 	// flag value through to the provision functions without modification.
 
 	mockRunner := ssh.NewMockRunner()
-	mockRunner.SetResponse("GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no' git clone -b main https://github.com/test/config.git /tmp/config-repo", "", "", nil)
+	mockRunner.SetResponse(
+		"GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no' git clone -b main https://github.com/test/config.git /tmp/config-repo",
+		"",
+		"",
+		nil,
+	)
 
 	// When --inject-env is provided, add it to the context
 	envs := make(map[string]string)
 	envs["GIT_SSH_COMMAND"] = "ssh -o StrictHostKeyChecking=no"
 	ctx := execcontext.New(envs, []string{})
 
-	err := provision.CloneOrPullRepoWithBranchAndEnv(
+	err := provision.CloneOrPullRepo(
 		ctx,
 		mockRunner,
-		"https://github.com/test/config.git",
 		"/tmp/config-repo",
-		"main",
+		provision.GitRepo{
+			URL:    "https://github.com/test/config.git",
+			Branch: "main",
+		},
 	)
 
 	assert.NoError(t, err, "bootstrap should work with --inject-env flag set")

@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -10,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ import (
 func TestCreateEnvironment(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
 
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 	env, err := manager.CreateEnvironment(ctx)
 
 	require.NoError(t, err)
@@ -34,7 +34,7 @@ func TestCreateEnvironment(t *testing.T) {
 // TestIDFormat verifies ID generation produces correct format
 func TestIDFormat(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	env, err := manager.CreateEnvironment(ctx)
 	require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestIDFormat(t *testing.T) {
 // TestIDContainsCurrentDate verifies date portion of ID is current date
 func TestIDContainsCurrentDate(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	env, err := manager.CreateEnvironment(ctx)
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestIDContainsCurrentDate(t *testing.T) {
 // TestIDUniqueness verifies that rapidly generated IDs are unique
 func TestIDUniqueness(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	ids := make(map[string]bool)
 	for i := 0; i < 100; i++ {
@@ -93,7 +93,7 @@ func TestIDUniqueness(t *testing.T) {
 // TestGetEnvironment verifies retrieval of existing environment
 func TestGetEnvironment(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create an environment
 	created, err := manager.CreateEnvironment(ctx)
@@ -113,7 +113,7 @@ func TestGetEnvironment(t *testing.T) {
 // TestGetEnvironmentNotFound verifies error when environment doesn't exist
 func TestGetEnvironmentNotFound(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	retrieved, err := manager.GetEnvironment(ctx, "e2e-nonexistent")
 	assert.Error(t, err)
@@ -124,7 +124,7 @@ func TestGetEnvironmentNotFound(t *testing.T) {
 // TestGetEnvironmentReturnsCopy verifies modifications don't affect internal state
 func TestGetEnvironmentReturnsCopy(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	created, err := manager.CreateEnvironment(ctx)
 	require.NoError(t, err)
@@ -148,7 +148,7 @@ func TestGetEnvironmentReturnsCopy(t *testing.T) {
 // TestListEnvironments verifies listing all environments
 func TestListEnvironments(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create multiple environments
 	ids := []string{}
@@ -177,7 +177,7 @@ func TestListEnvironments(t *testing.T) {
 // TestListEnvironmentsEmpty verifies empty list when no environments
 func TestListEnvironmentsEmpty(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	envs, err := manager.ListEnvironments(ctx)
 	require.NoError(t, err)
@@ -187,7 +187,7 @@ func TestListEnvironmentsEmpty(t *testing.T) {
 // TestListEnvironmentsReturnsCopies verifies modifications don't affect internal state
 func TestListEnvironmentsReturnsCopies(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	created, err := manager.CreateEnvironment(ctx)
 	require.NoError(t, err)
@@ -212,7 +212,7 @@ func TestListEnvironmentsReturnsCopies(t *testing.T) {
 // TestUpdateEnvironment verifies updating an existing environment
 func TestUpdateEnvironment(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create environment
 	created, err := manager.CreateEnvironment(ctx)
@@ -244,7 +244,7 @@ func TestUpdateEnvironment(t *testing.T) {
 // TestUpdateEnvironmentNotFound verifies error when updating non-existent environment
 func TestUpdateEnvironmentNotFound(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	env := &TestEnvironment{ID: "nonexistent"}
 	err := manager.UpdateEnvironment(ctx, env)
@@ -255,7 +255,7 @@ func TestUpdateEnvironmentNotFound(t *testing.T) {
 // TestUpdateEnvironmentNil verifies error when updating nil environment
 func TestUpdateEnvironmentNil(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	err := manager.UpdateEnvironment(ctx, nil)
 	assert.Error(t, err)
@@ -264,7 +264,7 @@ func TestUpdateEnvironmentNil(t *testing.T) {
 // TestDeleteEnvironment verifies deleting an environment
 func TestDeleteEnvironment(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create environment
 	created, err := manager.CreateEnvironment(ctx)
@@ -286,7 +286,7 @@ func TestDeleteEnvironment(t *testing.T) {
 // TestDeleteEnvironmentNotFound verifies error when deleting non-existent environment
 func TestDeleteEnvironmentNotFound(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	err := manager.DeleteEnvironment(ctx, "nonexistent")
 	assert.Error(t, err)
@@ -296,7 +296,7 @@ func TestDeleteEnvironmentNotFound(t *testing.T) {
 // TestDeleteEnvironmentRemovesFromList verifies environment is removed from list
 func TestDeleteEnvironmentRemovesFromList(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create 3 environments
 	ids := []string{}
@@ -334,70 +334,10 @@ func TestGetArtifactDir(t *testing.T) {
 	assert.Equal(t, artifactDir, result)
 }
 
-// TestContextCancellationCreateEnvironment verifies context cancellation works
-func TestContextCancellationCreateEnvironment(t *testing.T) {
-	manager := NewManager("/tmp/artifacts")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := manager.CreateEnvironment(ctx)
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
-// TestContextCancellationGetEnvironment verifies context cancellation works
-func TestContextCancellationGetEnvironment(t *testing.T) {
-	manager := NewManager("/tmp/artifacts")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := manager.GetEnvironment(ctx, "any-id")
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
-// TestContextCancellationListEnvironments verifies context cancellation works
-func TestContextCancellationListEnvironments(t *testing.T) {
-	manager := NewManager("/tmp/artifacts")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := manager.ListEnvironments(ctx)
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
-// TestContextCancellationUpdateEnvironment verifies context cancellation works
-func TestContextCancellationUpdateEnvironment(t *testing.T) {
-	manager := NewManager("/tmp/artifacts")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := manager.UpdateEnvironment(ctx, &TestEnvironment{ID: "any-id"})
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
-// TestContextCancellationDeleteEnvironment verifies context cancellation works
-func TestContextCancellationDeleteEnvironment(t *testing.T) {
-	manager := NewManager("/tmp/artifacts")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := manager.DeleteEnvironment(ctx, "any-id")
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
 // TestConcurrentOperations verifies thread-safety with concurrent operations
 func TestConcurrentOperations(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	var wg sync.WaitGroup
 	const goroutines = 10
@@ -426,7 +366,7 @@ func TestConcurrentOperations(t *testing.T) {
 // TestConcurrentUpdates verifies thread-safety with concurrent updates
 func TestConcurrentUpdates(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create one environment
 	env, err := manager.CreateEnvironment(ctx)
@@ -460,7 +400,7 @@ func TestConcurrentUpdates(t *testing.T) {
 // TestTimestampAccuracy verifies timestamps are set correctly
 func TestTimestampAccuracy(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	beforeCreate := time.Now().UTC()
 	env, err := manager.CreateEnvironment(ctx)
@@ -475,7 +415,7 @@ func TestTimestampAccuracy(t *testing.T) {
 // TestEnvironmentStructFields verifies all fields in created environment
 func TestEnvironmentStructFields(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	env, err := manager.CreateEnvironment(ctx)
 	require.NoError(t, err)
@@ -493,7 +433,7 @@ func TestEnvironmentStructFields(t *testing.T) {
 // BenchmarkCreateEnvironment measures performance of environment creation
 func BenchmarkCreateEnvironment(b *testing.B) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -517,7 +457,7 @@ func BenchmarkIDGeneration(b *testing.B) {
 // TestManagedResourcesTracking verifies ManagedResources are properly initialized
 func TestManagedResourcesTracking(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	env, err := manager.CreateEnvironment(ctx)
 	require.NoError(t, err)
@@ -530,7 +470,7 @@ func TestManagedResourcesTracking(t *testing.T) {
 // TestManagedResourcesPersistence verifies ManagedResources can be updated and persisted
 func TestManagedResourcesPersistence(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	env, err := manager.CreateEnvironment(ctx)
 	require.NoError(t, err)
@@ -555,7 +495,7 @@ func TestManagedResourcesPersistence(t *testing.T) {
 // TestParseIDExtractsDate verifies that date can be extracted from ID
 func TestParseIDExtractsDate(t *testing.T) {
 	manager := NewManager("/tmp/artifacts")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	env, err := manager.CreateEnvironment(ctx)
 	require.NoError(t, err)

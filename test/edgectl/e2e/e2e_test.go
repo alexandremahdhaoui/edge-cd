@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"context"
 	"flag"
 	"os"
 	"os/exec"
@@ -9,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	te2e "github.com/alexandremahdhaoui/edge-cd/pkg/test/e2e"
 	"libvirt.org/go/libvirt"
 )
@@ -30,7 +30,7 @@ func TestE2EBootstrapCommand(t *testing.T) {
 	}
 	conn.Close()
 
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 	tempDir := t.TempDir()
 
 	// Setup test environment

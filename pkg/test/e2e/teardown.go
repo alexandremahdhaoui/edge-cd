@@ -1,12 +1,12 @@
 package e2e
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 )
 
@@ -15,12 +15,7 @@ import (
 //
 // This function is best-effort - it attempts to clean up all resources even if some operations fail.
 // Returns a combined error if any cleanup operations failed, but other cleanup continues.
-func TeardownTestEnvironment(ctx context.Context, env *TestEnvironment) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
+func TeardownTestEnvironment(ctx execcontext.Context, env *TestEnvironment) error {
 
 	if env == nil || env.ID == "" {
 		return fmt.Errorf("invalid test environment: nil or empty ID")
@@ -67,7 +62,7 @@ func TeardownTestEnvironment(ctx context.Context, env *TestEnvironment) error {
 // destroyVMByName destroys a VM by name via libvirt.
 // It handles both running and stopped VMs.
 // If the VM doesn't exist, it returns nil (not an error) since the goal is cleanup.
-func destroyVMByName(ctx context.Context, vmName string) error {
+func destroyVMByName(ctx execcontext.Context, vmName string) error {
 	// Connect to libvirt
 	vmManager, err := vmm.NewVMM()
 	if err != nil {
@@ -96,12 +91,7 @@ func destroyVMByName(ctx context.Context, vmName string) error {
 
 // TeardownTestEnvironmentWithLogging is like TeardownTestEnvironment but logs all cleanup operations.
 // Useful for CLI tools that want to show progress to the user.
-func TeardownTestEnvironmentWithLogging(ctx context.Context, env *TestEnvironment) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
+func TeardownTestEnvironmentWithLogging(ctx execcontext.Context, env *TestEnvironment) error {
 
 	if env == nil || env.ID == "" {
 		return fmt.Errorf("invalid test environment: nil or empty ID")

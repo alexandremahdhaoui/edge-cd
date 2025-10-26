@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
@@ -72,23 +71,7 @@ func (c *Client) Run(
 	session.Stdout = &stdoutBuf
 	session.Stderr = &stderrBuf
 
-	// Set environment variables for the SSH session
-	for k, v := range ctx.Envs() {
-		if err := session.Setenv(k, v); err != nil {
-			// Log but don't fail - some servers don't support Setenv
-			slog.Debug("unable to set environment variable", "key", k, "error", err)
-		}
-	}
-
-	// Compose the final command with prepend commands
-	finalCmd := strings.Join(cmd, " ")
-	prependCmd := ctx.PrependCmd()
-	if len(prependCmd) > 0 {
-		// Prepend the command (e.g., "sudo", "-E")
-		finalCmd = strings.Join(append(prependCmd, finalCmd), " ")
-	}
-
-	if err := session.Run(finalCmd); err != nil {
+	if err := session.Run(execcontext.FormatCmd(ctx, cmd...)); err != nil {
 		return stdoutBuf.String(), stderrBuf.String(), fmt.Errorf("remote command failed: %w", err)
 	}
 
@@ -139,6 +122,6 @@ func (c *Client) AwaitServer(timeout time.Duration) error {
 
 func runFuncAndLogErr(f func() error) {
 	if err := f(); err != nil {
-		slog.Error(err.Error())
+		slog.Error("error closing ssh session or connection", "err", err.Error())
 	}
 }

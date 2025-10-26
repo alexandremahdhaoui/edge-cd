@@ -148,22 +148,22 @@ func main() {
 
 		// Create execution contexts
 		// Build environment variables map
-		envs := make(map[string]string)
+		targetInjectedEnvs := make(map[string]string)
 
 		// Add injected environment variables if provided
 		if *injectEnv != "" {
 			envKey, envValue := parseEnvFromFlag(*injectEnv)
 			if envKey != "" {
-				envs[envKey] = envValue
+				targetInjectedEnvs[envKey] = envValue
 			}
 		}
 
 		// Create contexts using the immutable factory function
 		// targetExecCtx: for remote commands requiring privilege escalation (sudo -E)
-		targetExecCtx := execcontext.New(envs, []string{"sudo", "-E"})
+		targetExecCtx := execcontext.New(targetInjectedEnvs, []string{"sudo", "-E"})
 
 		// localExecCtx: for local git operations without privilege escalation
-		localExecCtx := execcontext.New(envs, []string{})
+		localExecCtx := execcontext.New(nil, nil)
 
 		// Clone edge-cd repo locally to get package manager configs
 		localEdgeCDRepoTempDir, err := os.MkdirTemp("", "edgectl-local-edge-cd-repo-")
@@ -189,15 +189,19 @@ func main() {
 		// Package Provisioning
 		pkgs := strings.Split(*packages, ",")
 		if len(pkgs) > 0 {
-			if err := provision.ProvisionPackagesWithEnv(targetExecCtx, sshClient, pkgs, *packageManager, localEdgeCDRepoTempDir, *edgeCDRepo, remoteEdgeCDRepoDestPath); err != nil {
+			if err := provision.ProvisionPackages(targetExecCtx, sshClient, pkgs, *packageManager, localEdgeCDRepoTempDir, *edgeCDRepo, remoteEdgeCDRepoDestPath); err != nil {
 				log.Fatalf("Failed to provision packages: %v", err)
 			}
 		}
 
-		// Repo Cloning (only user config repo needs to be cloned here, edge-cd repo is handled in ProvisionPackages)
+		// Repo Cloning (only user config configGitRepo needs to be cloned here, edge-cd configGitRepo is handled in ProvisionPackages)
 		// Note: Git operations run as the target user and don't need privilege escalation
 		// They use localExecCtx which has only the environment variables, no sudo
-		if err := provision.CloneOrPullRepoWithBranchAndEnv(localExecCtx, sshClient, *configRepo, userConfigRepoPath, *configBranch); err != nil {
+		configGitRepo := provision.GitRepo{
+			URL:    *configRepo,
+			Branch: *configBranch,
+		}
+		if err := provision.CloneOrPullRepo(localExecCtx, sshClient, userConfigRepoPath, configGitRepo); err != nil {
 			log.Fatalf("Failed to clone user config repo: %v", err)
 		}
 

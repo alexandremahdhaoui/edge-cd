@@ -1,7 +1,6 @@
 package provision_test
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -10,6 +9,8 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/edgectl/provision"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestProvisionPackages(t *testing.T) {
@@ -43,30 +44,26 @@ install: ["apt-get", "install", "-y"]
 		// Create context with no env vars or prepend commands
 		ctx := execcontext.New(make(map[string]string), []string{})
 
-		// Set expected responses for the mock runner
-		// Commands will be formatted by execcontext.FormatCmd, which quotes arguments
-		mock.SetResponse(fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath), "", "", nil)
-		mock.SetResponse("apt-get update", "", "", nil)
-		mock.SetResponse("apt-get install -y git curl", "", "", nil)
+		// Commands are now formatted with FormatCmd, so we expect quoted arguments
+		expectedCloneCmd := execcontext.FormatCmd(ctx, "git", "clone", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath)
+		expectedUpdateCmd := execcontext.FormatCmd(ctx, "apt-get", "update")
+		expectedInstallCmd := execcontext.FormatCmd(ctx, "apt-get", "install", "-y", "git", "curl")
 
 		if err := provision.ProvisionPackages(ctx, mock, packages, "apt", localPkgMgrRepoPath, remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath); err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 
 		expectedCommands := []string{
-			fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath),
-			"apt-get update",
-			"apt-get install -y git curl",
+			expectedCloneCmd,
+			expectedUpdateCmd,
+			expectedInstallCmd,
 		}
 
-		if err := mock.AssertNumberOfCommandsRun(len(expectedCommands)); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, mock.AssertNumberOfCommandsRun(len(expectedCommands)))
+		require.Equal(t, len(expectedCommands), len(mock.Commands))
 
 		for i, cmd := range mock.Commands {
-			if cmd != expectedCommands[i] {
-				t.Errorf("expected command '%s' at index %d, got '%s'", expectedCommands[i], i, cmd)
-			}
+			assert.Equal(t, expectedCommands[i], cmd, "command at index %d mismatch", i)
 		}
 	})
 
@@ -80,27 +77,24 @@ install: ["apt-get", "install", "-y"]
 		// Create context with no env vars or prepend commands
 		ctx := execcontext.New(make(map[string]string), []string{})
 
-		// Set expected responses for the mock runner
-		mock.SetResponse(fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath), "", "", nil)
-		mock.SetResponse("apt-get update", "", "", nil)
+		// Commands are now formatted with FormatCmd, so we expect quoted arguments
+		expectedCloneCmd := execcontext.FormatCmd(ctx, "git", "clone", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath)
+		expectedUpdateCmd := execcontext.FormatCmd(ctx, "apt-get", "update")
 
 		if err := provision.ProvisionPackages(ctx, mock, packages, "apt", localPkgMgrRepoPath, remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath); err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 
 		expectedCommands := []string{
-			fmt.Sprintf("git clone %s %s", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath),
-			"apt-get update",
+			expectedCloneCmd,
+			expectedUpdateCmd,
 		}
 
-		if err := mock.AssertNumberOfCommandsRun(len(expectedCommands)); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, mock.AssertNumberOfCommandsRun(len(expectedCommands)))
+		require.Equal(t, len(expectedCommands), len(mock.Commands))
 
 		for i, cmd := range mock.Commands {
-			if cmd != expectedCommands[i] {
-				t.Errorf("expected command '%s' at index %d, got '%s'", expectedCommands[i], i, cmd)
-			}
+			assert.Equal(t, expectedCommands[i], cmd, "command at index %d mismatch", i)
 		}
 	})
 }

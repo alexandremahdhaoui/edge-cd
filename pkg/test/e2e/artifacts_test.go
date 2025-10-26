@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +30,7 @@ func TestSaveAndLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
 
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create and save
 	store1 := NewJSONArtifactStore(filePath)
@@ -61,7 +61,7 @@ func TestSaveAndLoad(t *testing.T) {
 func TestSaveNilEnvironment(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	err := store.Save(ctx, nil)
 	assert.Error(t, err)
@@ -72,7 +72,7 @@ func TestSaveNilEnvironment(t *testing.T) {
 func TestSaveEmptyIDEnvironment(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	env := &TestEnvironment{ID: ""}
 	err := store.Save(ctx, env)
@@ -84,7 +84,7 @@ func TestSaveEmptyIDEnvironment(t *testing.T) {
 func TestLoadByID(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	env := &TestEnvironment{
@@ -104,7 +104,7 @@ func TestLoadByID(t *testing.T) {
 func TestLoadNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	retrieved, err := store.Load(ctx, "nonexistent")
 	assert.Error(t, err)
@@ -116,7 +116,7 @@ func TestLoadNotFound(t *testing.T) {
 func TestLoadEmptyID(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	retrieved, err := store.Load(ctx, "")
 	assert.Error(t, err)
@@ -128,7 +128,7 @@ func TestLoadEmptyID(t *testing.T) {
 func TestLoadReturnsCopy(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	env := &TestEnvironment{
@@ -156,7 +156,7 @@ func TestLoadReturnsCopy(t *testing.T) {
 func TestListAll(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 
@@ -180,7 +180,7 @@ func TestListAll(t *testing.T) {
 func TestListAllEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	envs, err := store.ListAll(ctx)
 	require.NoError(t, err)
@@ -192,7 +192,7 @@ func TestListAllEmpty(t *testing.T) {
 func TestListAllReturnsCopies(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	env := &TestEnvironment{
@@ -220,7 +220,7 @@ func TestListAllReturnsCopies(t *testing.T) {
 func TestDelete(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	env := &TestEnvironment{
@@ -248,7 +248,7 @@ func TestDelete(t *testing.T) {
 func TestDeleteNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	err := store.Delete(ctx, "nonexistent")
 	assert.Error(t, err)
@@ -259,7 +259,7 @@ func TestDeleteNotFound(t *testing.T) {
 func TestDeleteEmptyID(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	err := store.Delete(ctx, "")
 	assert.Error(t, err)
@@ -270,7 +270,7 @@ func TestDeleteEmptyID(t *testing.T) {
 func TestDeletePersistsToDisk(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Save with store1
 	store1 := NewJSONArtifactStore(filePath)
@@ -293,7 +293,7 @@ func TestDeletePersistsToDisk(t *testing.T) {
 func TestStoreUpdateEnvironment(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 
@@ -323,7 +323,7 @@ func TestStoreUpdateEnvironment(t *testing.T) {
 func TestJSONSchema(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	env := &TestEnvironment{
@@ -359,7 +359,7 @@ func TestJSONSchemaInvalid(t *testing.T) {
 	err := os.WriteFile(filePath, []byte("invalid json"), 0o644)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 	store := NewJSONArtifactStore(filePath)
 	_, err = store.Load(ctx, "any")
 	assert.Error(t, err)
@@ -381,7 +381,7 @@ func TestJSONSchemaMissingVersion(t *testing.T) {
 	err = os.WriteFile(filePath, data, 0o644)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 	store := NewJSONArtifactStore(filePath)
 	_, err = store.Load(ctx, "any")
 	assert.Error(t, err)
@@ -392,7 +392,7 @@ func TestJSONSchemaMissingVersion(t *testing.T) {
 func TestMultipleSaveLoads(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create, save, and load multiple times
 	for i := 0; i < 3; i++ {
@@ -433,7 +433,7 @@ func TestCloseMethod(t *testing.T) {
 func TestEnvironmentWithGitSSHURLs(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	env := &TestEnvironment{
@@ -458,7 +458,7 @@ func TestEnvironmentWithGitSSHURLs(t *testing.T) {
 func TestEnvironmentWithVMMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	env := &TestEnvironment{
@@ -487,64 +487,11 @@ func TestEnvironmentWithVMMetadata(t *testing.T) {
 	assert.Equal(t, uint(2), retrieved.TargetVM.VCPUs)
 }
 
-// TestContextCancellationSave verifies context cancellation in Save
-func TestContextCancellationSave(t *testing.T) {
-	tmpDir := t.TempDir()
-	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	env := &TestEnvironment{ID: "test"}
-	err := store.Save(ctx, env)
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
-// TestContextCancellationLoad verifies context cancellation in Load
-func TestContextCancellationLoad(t *testing.T) {
-	tmpDir := t.TempDir()
-	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := store.Load(ctx, "any")
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
-// TestContextCancellationListAll verifies context cancellation in ListAll
-func TestContextCancellationListAll(t *testing.T) {
-	tmpDir := t.TempDir()
-	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := store.ListAll(ctx)
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
-// TestContextCancellationDelete verifies context cancellation in Delete
-func TestContextCancellationDelete(t *testing.T) {
-	tmpDir := t.TempDir()
-	store := NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := store.Delete(ctx, "any")
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
 // BenchmarkSave measures save performance
 func BenchmarkSave(b *testing.B) {
 	tmpDir := b.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 
@@ -562,7 +509,7 @@ func BenchmarkSave(b *testing.B) {
 func BenchmarkLoad(b *testing.B) {
 	tmpDir := b.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	env := &TestEnvironment{ID: "e2e-20231025-abc123"}
@@ -578,7 +525,7 @@ func BenchmarkLoad(b *testing.B) {
 func BenchmarkListAll(b *testing.B) {
 	tmpDir := b.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	for i := 0; i < 100; i++ {
@@ -596,7 +543,7 @@ func BenchmarkListAll(b *testing.B) {
 func TestEnvironmentWithManagedResources(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 	env := &TestEnvironment{

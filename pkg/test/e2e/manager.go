@@ -1,24 +1,24 @@
 package e2e
 
 import (
-	"context"
 	"crypto/rand"
 	"fmt"
 	"math/big"
 	"sync"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 )
 
 // Status constants for test environments
 const (
-	StatusCreated           = "created"
-	StatusSetup             = "setup"
-	StatusRunning           = "running"
-	StatusPassed            = "passed"
-	StatusFailed            = "failed"
-	StatusPartiallyDeleted  = "partially_deleted"
+	StatusCreated          = "created"
+	StatusSetup            = "setup"
+	StatusRunning          = "running"
+	StatusPassed           = "passed"
+	StatusFailed           = "failed"
+	StatusPartiallyDeleted = "partially_deleted"
 )
 
 // TestEnvironment represents a complete test execution context
@@ -50,20 +50,20 @@ type SSHKeyInfo struct {
 type TestEnvironmentManager interface {
 	// CreateEnvironment creates a new test environment with unique ID
 	// Returns populated TestEnvironment (except VM/artifact details)
-	CreateEnvironment(ctx context.Context) (*TestEnvironment, error)
+	CreateEnvironment(ctx execcontext.Context) (*TestEnvironment, error)
 
 	// GetEnvironment retrieves an existing environment by ID
-	GetEnvironment(ctx context.Context, id string) (*TestEnvironment, error)
+	GetEnvironment(ctx execcontext.Context, id string) (*TestEnvironment, error)
 
 	// ListEnvironments returns all known environments (optionally filtered by status)
-	ListEnvironments(ctx context.Context) ([]*TestEnvironment, error)
+	ListEnvironments(ctx execcontext.Context) ([]*TestEnvironment, error)
 
 	// UpdateEnvironment saves changes to an existing environment
-	UpdateEnvironment(ctx context.Context, env *TestEnvironment) error
+	UpdateEnvironment(ctx execcontext.Context, env *TestEnvironment) error
 
 	// DeleteEnvironment removes environment from internal tracking
 	// Note: Does NOT delete VMs or artifacts (that's caller's responsibility)
-	DeleteEnvironment(ctx context.Context, id string) error
+	DeleteEnvironment(ctx execcontext.Context, id string) error
 
 	// GetArtifactDir returns the base directory where artifacts should be stored
 	GetArtifactDir() string
@@ -110,13 +110,9 @@ func randString(length int) string {
 
 // CreateEnvironment creates a new test environment with a unique ID
 // Returns a TestEnvironment with ID, timestamps, and default status set
-func (m *Manager) CreateEnvironment(ctx context.Context) (*TestEnvironment, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
+func (m *Manager) CreateEnvironment(
+	execCtx execcontext.Context,
+) (*TestEnvironment, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -148,12 +144,7 @@ func (m *Manager) environmentExists(id string) bool {
 }
 
 // GetEnvironment retrieves an existing environment by ID
-func (m *Manager) GetEnvironment(ctx context.Context, id string) (*TestEnvironment, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
+func (m *Manager) GetEnvironment(ctx execcontext.Context, id string) (*TestEnvironment, error) {
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -168,12 +159,7 @@ func (m *Manager) GetEnvironment(ctx context.Context, id string) (*TestEnvironme
 }
 
 // ListEnvironments returns all known environments
-func (m *Manager) ListEnvironments(ctx context.Context) ([]*TestEnvironment, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
+func (m *Manager) ListEnvironments(ctx execcontext.Context) ([]*TestEnvironment, error) {
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -186,12 +172,7 @@ func (m *Manager) ListEnvironments(ctx context.Context) ([]*TestEnvironment, err
 }
 
 // UpdateEnvironment saves changes to an existing environment
-func (m *Manager) UpdateEnvironment(ctx context.Context, env *TestEnvironment) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
+func (m *Manager) UpdateEnvironment(ctx execcontext.Context, env *TestEnvironment) error {
 
 	if env == nil || env.ID == "" {
 		return fmt.Errorf("invalid environment: nil or empty ID")
@@ -211,12 +192,7 @@ func (m *Manager) UpdateEnvironment(ctx context.Context, env *TestEnvironment) e
 
 // DeleteEnvironment removes environment from internal tracking
 // Note: Does NOT delete VMs or artifacts (that's caller's responsibility)
-func (m *Manager) DeleteEnvironment(ctx context.Context, id string) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
+func (m *Manager) DeleteEnvironment(ctx execcontext.Context, id string) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

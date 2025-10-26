@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 )
 
 // Error types for artifact store operations
@@ -28,19 +29,19 @@ type ArtifactStore interface {
 	// Save persists a test environment to storage
 	// If environment already exists, it overwrites it
 	// Must create parent directories if needed
-	Save(ctx context.Context, env *TestEnvironment) error
+	Save(ctx execcontext.Context, env *TestEnvironment) error
 
 	// Load retrieves a test environment by ID
 	// Returns ErrNotFound if environment doesn't exist
-	Load(ctx context.Context, id string) (*TestEnvironment, error)
+	Load(ctx execcontext.Context, id string) (*TestEnvironment, error)
 
 	// ListAll returns all persisted environments
 	// Returns empty slice (not nil) if no environments exist
-	ListAll(ctx context.Context) ([]*TestEnvironment, error)
+	ListAll(ctx execcontext.Context) ([]*TestEnvironment, error)
 
 	// Delete removes an environment from storage
 	// Returns ErrNotFound if environment doesn't exist
-	Delete(ctx context.Context, id string) error
+	Delete(ctx execcontext.Context, id string) error
 
 	// GetStorePath returns the path where artifacts are stored
 	GetStorePath() string
@@ -77,12 +78,7 @@ func NewJSONArtifactStore(filePath string) *JSONArtifactStore {
 }
 
 // Save persists a test environment to storage
-func (j *JSONArtifactStore) Save(ctx context.Context, env *TestEnvironment) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
+func (j *JSONArtifactStore) Save(ctx execcontext.Context, env *TestEnvironment) error {
 
 	if env == nil || env.ID == "" {
 		return fmt.Errorf("%w: nil or empty environment", ErrInvalidSchema)
@@ -112,12 +108,7 @@ func (j *JSONArtifactStore) Save(ctx context.Context, env *TestEnvironment) erro
 }
 
 // Load retrieves a test environment by ID
-func (j *JSONArtifactStore) Load(ctx context.Context, id string) (*TestEnvironment, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
+func (j *JSONArtifactStore) Load(ctx execcontext.Context, id string) (*TestEnvironment, error) {
 
 	if id == "" {
 		return nil, fmt.Errorf("%w: empty ID", ErrInvalidSchema)
@@ -145,12 +136,7 @@ func (j *JSONArtifactStore) Load(ctx context.Context, id string) (*TestEnvironme
 }
 
 // ListAll returns all persisted environments
-func (j *JSONArtifactStore) ListAll(ctx context.Context) ([]*TestEnvironment, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
+func (j *JSONArtifactStore) ListAll(ctx execcontext.Context) ([]*TestEnvironment, error) {
 
 	// Try to load from disk first if not already loaded
 	if err := j.loadIfNeeded(); err != nil && !os.IsNotExist(err) {
@@ -168,12 +154,7 @@ func (j *JSONArtifactStore) ListAll(ctx context.Context) ([]*TestEnvironment, er
 }
 
 // Delete removes an environment from storage
-func (j *JSONArtifactStore) Delete(ctx context.Context, id string) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
+func (j *JSONArtifactStore) Delete(ctx execcontext.Context, id string) error {
 
 	if id == "" {
 		return fmt.Errorf("%w: empty ID", ErrInvalidSchema)

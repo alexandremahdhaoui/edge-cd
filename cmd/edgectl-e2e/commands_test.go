@@ -1,12 +1,12 @@
 package main
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	te2e "github.com/alexandremahdhaoui/edge-cd/pkg/test/e2e"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 	"github.com/stretchr/testify/assert"
@@ -29,7 +29,7 @@ func TestEnvironmentLoadingFromStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	storeFile := filepath.Join(tmpDir, "artifacts.json")
 
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 	store := te2e.NewJSONArtifactStore(storeFile)
 
 	// Create and save a test environment
@@ -61,7 +61,7 @@ func TestEnvironmentDeletion(t *testing.T) {
 	tmpDir := t.TempDir()
 	storeFile := filepath.Join(tmpDir, "artifacts.json")
 
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 	store := te2e.NewJSONArtifactStore(storeFile)
 
 	// Create and save a test environment
@@ -114,7 +114,7 @@ func TestCreateCommandTempDirStructure(t *testing.T) {
 	tmpDir := t.TempDir()
 	storeFile := filepath.Join(tmpDir, "artifacts.json")
 
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 	store := te2e.NewJSONArtifactStore(storeFile)
 
 	// Create a test environment with proper temp dir structure
@@ -226,7 +226,7 @@ func TestDeleteCommandTracksResources(t *testing.T) {
 	tmpDir := t.TempDir()
 	storeFile := filepath.Join(tmpDir, "artifacts.json")
 
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 	store := te2e.NewJSONArtifactStore(storeFile)
 
 	// Create a test environment with managed resources

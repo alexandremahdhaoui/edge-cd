@@ -1,11 +1,11 @@
 package e2e
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	te2e "github.com/alexandremahdhaoui/edge-cd/pkg/test/e2e"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,7 +14,7 @@ import (
 // TestEnvironmentManagerIntegration tests the full lifecycle of environment management
 func TestEnvironmentManagerIntegration(t *testing.T) {
 	tmpDir := t.TempDir()
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create manager
 	manager := te2e.NewManager(tmpDir)
@@ -59,7 +59,7 @@ func TestEnvironmentManagerIntegration(t *testing.T) {
 func TestArtifactStorePersistence(t *testing.T) {
 	tmpDir := t.TempDir()
 	storeFile := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	// Create first store instance and save environment
 	store1 := te2e.NewJSONArtifactStore(storeFile)
@@ -81,7 +81,7 @@ func TestArtifactStorePersistence(t *testing.T) {
 // TestEnvironmentIDFormat tests that generated IDs follow the correct format
 func TestEnvironmentIDFormat(t *testing.T) {
 	tmpDir := t.TempDir()
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	manager := te2e.NewManager(tmpDir)
 
@@ -102,7 +102,7 @@ func TestEnvironmentIDFormat(t *testing.T) {
 func TestMultipleEnvironments(t *testing.T) {
 	tmpDir := t.TempDir()
 	storeFile := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	manager := te2e.NewManager(tmpDir)
 	store := te2e.NewJSONArtifactStore(storeFile)
@@ -134,7 +134,7 @@ func TestMultipleEnvironments(t *testing.T) {
 func TestEnvironmentUpdateFlow(t *testing.T) {
 	tmpDir := t.TempDir()
 	storeFile := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	manager := te2e.NewManager(tmpDir)
 	store := te2e.NewJSONArtifactStore(storeFile)
@@ -160,7 +160,7 @@ func TestEnvironmentUpdateFlow(t *testing.T) {
 // TestErrorHandling tests error conditions
 func TestErrorHandling(t *testing.T) {
 	tmpDir := t.TempDir()
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	manager := te2e.NewManager(tmpDir)
 	store := te2e.NewJSONArtifactStore(filepath.Join(tmpDir, "artifacts.json"))
@@ -182,23 +182,10 @@ func TestErrorHandling(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestContextCancellation tests context cancellation handling
-func TestContextCancellation(t *testing.T) {
-	tmpDir := t.TempDir()
-	manager := te2e.NewManager(tmpDir)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	// Operations with cancelled context should fail
-	_, err := manager.CreateEnvironment(ctx)
-	assert.Error(t, err)
-}
-
 // TestArtifactPath tests that artifact paths can be set and used
 func TestArtifactPath(t *testing.T) {
 	tmpDir := t.TempDir()
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	manager := te2e.NewManager(tmpDir)
 	env, err := manager.CreateEnvironment(ctx)
@@ -221,7 +208,7 @@ func TestArtifactPath(t *testing.T) {
 func TestSSHKeyPathsStorage(t *testing.T) {
 	tmpDir := t.TempDir()
 	storeFile := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := te2e.NewJSONArtifactStore(storeFile)
 	env := &te2e.TestEnvironment{
@@ -246,7 +233,7 @@ func TestSSHKeyPathsStorage(t *testing.T) {
 func TestGitSSHURLs(t *testing.T) {
 	tmpDir := t.TempDir()
 	storeFile := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := te2e.NewJSONArtifactStore(storeFile)
 	env := &te2e.TestEnvironment{

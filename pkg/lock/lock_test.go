@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/lock"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 )
@@ -217,49 +218,56 @@ func cleanupContainerHelper(t *testing.T, containerID string) {
 func TestLock(t *testing.T) {
 	mockRunner := ssh.NewMockRunner()
 
+	// Create execcontext for tests
+	execCtx := execcontext.New(make(map[string]string), []string{})
+
+	// Commands are now formatted with FormatCmd
+	mkdirCmd := execcontext.FormatCmd(execCtx, "mkdir", "/tmp/edgectl.lock")
+	rmdirCmd := execcontext.FormatCmd(execCtx, "rmdir", "/tmp/edgectl.lock")
+
 	// Test Acquire success
-	mockRunner.SetResponse("mkdir /tmp/edgectl.lock", "", "", nil)
-	err := lock.Acquire(mockRunner)
+	mockRunner.SetResponse(mkdirCmd, "", "", nil)
+	err := lock.Acquire(execCtx, mockRunner)
 	if err != nil {
 		t.Errorf("Expected no error on Acquire, got %v", err)
 	}
-	if err := mockRunner.AssertCommandRun("mkdir /tmp/edgectl.lock"); err != nil {
+	if err := mockRunner.AssertCommandRun(mkdirCmd); err != nil {
 		t.Error(err)
 	}
 
 	// Test Acquire contention
 	mockRunner = ssh.NewMockRunner() // Reset mock
 	mockRunner.SetResponse(
-		"mkdir /tmp/edgectl.lock",
+		mkdirCmd,
 		"",
 		"mkdir: cannot create directory '/tmp/edgectl.lock': File exists\n",
 		errors.New("exit status 1"),
 	)
-	err = lock.Acquire(mockRunner)
+	err = lock.Acquire(execCtx, mockRunner)
 	if !errors.Is(err, lock.ErrLockHeld) {
 		t.Errorf("Expected ErrLockHeld on Acquire contention, got %v", err)
 	}
 
 	// Test Release success
 	mockRunner = ssh.NewMockRunner() // Reset mock
-	mockRunner.SetResponse("rmdir /tmp/edgectl.lock", "", "", nil)
-	err = lock.Release(mockRunner)
+	mockRunner.SetResponse(rmdirCmd, "", "", nil)
+	err = lock.Release(execCtx, mockRunner)
 	if err != nil {
 		t.Errorf("Expected no error on Release, got %v", err)
 	}
-	if err := mockRunner.AssertCommandRun("rmdir /tmp/edgectl.lock"); err != nil {
+	if err := mockRunner.AssertCommandRun(rmdirCmd); err != nil {
 		t.Error(err)
 	}
 
 	// Test Release when lock doesn't exist
 	mockRunner = ssh.NewMockRunner() // Reset mock
 	mockRunner.SetResponse(
-		"rmdir /tmp/edgectl.lock",
+		rmdirCmd,
 		"",
 		"rmdir: failed to remove '/tmp/edgectl.lock': No such file or directory\n",
 		errors.New("exit status 1"),
 	)
-	err = lock.Release(mockRunner)
+	err = lock.Release(execCtx, mockRunner)
 	if err != nil {
 		t.Errorf("Expected no error on Release when lock doesn't exist, got %v", err)
 	}
@@ -285,14 +293,17 @@ func TestE2ELock(t *testing.T) {
 		t.Fatalf("Failed to create SSH client: %v", err)
 	}
 
+	// Create execcontext for E2E tests
+	execCtx := execcontext.New(make(map[string]string), []string{})
+
 	// Test Acquire success
-	err = lock.Acquire(client)
+	err = lock.Acquire(execCtx, client)
 	if err != nil {
 		t.Fatalf("Expected no error on E2E Acquire, got %v", err)
 	}
 
 	// Verify lock file exists on remote
-	stdout, stderr, err := client.Run("test -d /tmp/edgectl.lock && echo 'exists'")
+	stdout, stderr, err := client.Run(execCtx, "sh", "-c", "test -d /tmp/edgectl.lock && echo 'exists'")
 	if err != nil {
 		t.Fatalf("Failed to check lock file existence: %v\nStderr: %s", err, stderr)
 	}
@@ -301,19 +312,19 @@ func TestE2ELock(t *testing.T) {
 	}
 
 	// Test Acquire contention
-	err = lock.Acquire(client)
+	err = lock.Acquire(execCtx, client)
 	if !errors.Is(err, lock.ErrLockHeld) {
 		t.Errorf("Expected ErrLockHeld on E2E Acquire contention, got %v", err)
 	}
 
 	// Test Release success
-	err = lock.Release(client)
+	err = lock.Release(execCtx, client)
 	if err != nil {
 		t.Fatalf("Expected no error on E2E Release, got %v", err)
 	}
 
 	// Verify lock file is gone on remote
-	stdout, stderr, err = client.Run("test -d /tmp/edgectl.lock && echo 'exists'")
+	stdout, stderr, err = client.Run(execCtx, "sh", "-c", "test -d /tmp/edgectl.lock && echo 'exists'")
 	if err == nil {
 		t.Fatalf("Expected error checking for non-existent lock file, but got none. Stdout: %q", stdout)
 	}
@@ -327,7 +338,7 @@ func TestE2ELock(t *testing.T) {
 	}
 
 	// Test Release when lock doesn't exist (should still succeed)
-	err = lock.Release(client)
+	err = lock.Release(execCtx, client)
 	if err != nil {
 		t.Fatalf("Expected no error on E2E Release when lock doesn't exist, got %v", err)
 	}

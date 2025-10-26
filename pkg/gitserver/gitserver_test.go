@@ -1,7 +1,6 @@
 package gitserver_test
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/gitserver"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 )
@@ -130,7 +130,8 @@ func TestGitServerLifecycle(t *testing.T) {
 	server.AuthorizedKeys = append(server.AuthorizedKeys, string(publicKeyBytes))
 
 	t.Log("Running Git server VM...")
-	if err := server.Run(context.Background()); err != nil {
+	execCtx := execcontext.New(make(map[string]string), []string{})
+	if err := server.Run(execCtx); err != nil {
 		t.Fatalf("Failed to run Git server VM: %v", err)
 	}
 	t.Logf("Git server VM started successfully with IP: %s", server.GetVMIPAddress())
@@ -151,7 +152,7 @@ func TestGitServerLifecycle(t *testing.T) {
 	t.Log("SSH connection to Git server VM successful.")
 
 	// Run a simple command to verify SSH connectivity
-	stdout, stderr, err := sshClient.Run("echo hello from client")
+	stdout, stderr, err := sshClient.Run(execCtx, "echo", "hello", "from", "client")
 	if err != nil || strings.TrimSpace(stdout) != "hello from client" {
 		t.Fatalf(
 			"Failed to run basic command on VM via SSH: %v\nStdout: %s\nStderr: %s",
@@ -213,7 +214,8 @@ func TestGitServerWithRepo(t *testing.T) {
 	server.AuthorizedKeys = append(server.AuthorizedKeys, string(publicKeyBytes))
 
 	t.Log("Running Git server VM with repo...")
-	if err := server.Run(context.Background()); err != nil {
+	execCtx := execcontext.New(make(map[string]string), []string{})
+	if err := server.Run(execCtx); err != nil {
 		t.Fatalf("Failed to run Git server VM: %v", err)
 	}
 	t.Cleanup(func() {

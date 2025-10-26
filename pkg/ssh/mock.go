@@ -2,7 +2,6 @@ package ssh
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
@@ -34,7 +33,7 @@ func NewMockRunner() *MockRunner {
 }
 
 // Run records the command formatted with the execution context and returns a predefined response or a default.
-// It mimics SSH behavior: sets environment variables and composes the final command with prepend commands.
+// It mimics SSH behavior: calls FormatCmd (same as SSH client does)
 func (m *MockRunner) Run(
 	ctx execcontext.Context,
 	cmd ...string,
@@ -42,12 +41,8 @@ func (m *MockRunner) Run(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Compose the final command (same as SSH client does)
-	finalCmd := strings.Join(cmd, " ")
-	prependCmd := ctx.PrependCmd()
-	if len(prependCmd) > 0 {
-		finalCmd = strings.Join(append(prependCmd, finalCmd), " ")
-	}
+	// Format the command the same way SSH client does (with environment variables and prepend commands)
+	finalCmd := execcontext.FormatCmd(ctx, cmd...)
 
 	m.Commands = append(m.Commands, finalCmd)
 

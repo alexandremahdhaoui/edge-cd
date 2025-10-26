@@ -17,6 +17,13 @@ func TestSetupEdgeCDService(t *testing.T) {
 		t.Skipf("Skipping test: could not find edge-cd repository: %v", err)
 	}
 
+	// Create contexts for each test case to compute expected commands
+	emptyCtx := execcontext.New(make(map[string]string), []string{})
+	sudoCtx := execcontext.New(make(map[string]string), []string{"sudo", "-E"})
+
+	systemdServicePath := filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/edge-cd.systemd")
+	procdServicePath := filepath.Join(repoPath, "cmd/edge-cd/service-managers/procd/edge-cd.procd")
+
 	tests := []struct {
 		name             string
 		serviceManager   string
@@ -28,9 +35,9 @@ func TestSetupEdgeCDService(t *testing.T) {
 			serviceManager: "systemd",
 			prependCmd:     []string{},
 			expectedCommands: []string{
-				fmt.Sprintf("cp %s /etc/systemd/system/edge-cd.service", filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/edge-cd.systemd")),
-				"systemctl enable edge-cd",
-				"systemctl start edge-cd",
+				execcontext.FormatCmd(emptyCtx, "cp", systemdServicePath, "/etc/systemd/system/edge-cd.service"),
+				execcontext.FormatCmd(emptyCtx, "systemctl", "enable", "edge-cd"),
+				execcontext.FormatCmd(emptyCtx, "systemctl", "start", "edge-cd"),
 			},
 		},
 		{
@@ -38,9 +45,9 @@ func TestSetupEdgeCDService(t *testing.T) {
 			serviceManager: "systemd",
 			prependCmd:     []string{"sudo", "-E"},
 			expectedCommands: []string{
-				fmt.Sprintf("sudo -E cp %s /etc/systemd/system/edge-cd.service", filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/edge-cd.systemd")),
-				"sudo -E systemctl enable edge-cd",
-				"sudo -E systemctl start edge-cd",
+				execcontext.FormatCmd(sudoCtx, "cp", systemdServicePath, "/etc/systemd/system/edge-cd.service"),
+				execcontext.FormatCmd(sudoCtx, "systemctl", "enable", "edge-cd"),
+				execcontext.FormatCmd(sudoCtx, "systemctl", "start", "edge-cd"),
 			},
 		},
 		{
@@ -48,9 +55,9 @@ func TestSetupEdgeCDService(t *testing.T) {
 			serviceManager: "procd",
 			prependCmd:     []string{},
 			expectedCommands: []string{
-				fmt.Sprintf("cp %s /etc/init.d/edge-cd", filepath.Join(repoPath, "cmd/edge-cd/service-managers/procd/edge-cd.procd")),
-				"/etc/init.d/edge-cd enable",
-				"service edge-cd restart",
+				execcontext.FormatCmd(emptyCtx, "cp", procdServicePath, "/etc/init.d/edge-cd"),
+				execcontext.FormatCmd(emptyCtx, "/etc/init.d/edge-cd", "enable"),
+				execcontext.FormatCmd(emptyCtx, "service", "edge-cd", "restart"),
 			},
 		},
 	}

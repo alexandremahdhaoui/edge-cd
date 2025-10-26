@@ -1,12 +1,12 @@
 package e2e
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,7 +135,7 @@ func TestTempDirRootFieldExists(t *testing.T) {
 func TestTempDirRootPersistsInStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "artifacts.json")
-	ctx := context.Background()
+	ctx := execcontext.New(make(map[string]string), []string{})
 
 	store := NewJSONArtifactStore(filePath)
 

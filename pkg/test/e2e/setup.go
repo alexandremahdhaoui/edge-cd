@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -37,13 +36,10 @@ type SetupConfig struct {
 //
 // Returns fully populated TestEnvironment ready for ExecuteBootstrapTest().
 // Caller is responsible for calling TeardownTestEnvironment() when done.
-func SetupTestEnvironment(ctx context.Context, config SetupConfig) (*TestEnvironment, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
+func SetupTestEnvironment(
+	execCtx execcontext.Context,
+	config SetupConfig,
+) (*TestEnvironment, error) {
 	// Validate config
 	if config.ArtifactDir == "" {
 		return nil, fmt.Errorf("ArtifactDir is required")
@@ -62,7 +58,7 @@ func SetupTestEnvironment(ctx context.Context, config SetupConfig) (*TestEnviron
 
 	// Create in-memory test environment
 	manager := NewManager(config.ArtifactDir)
-	testEnv, err := manager.CreateEnvironment(ctx)
+	testEnv, err := manager.CreateEnvironment(execCtx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test environment: %w", err)
 	}
@@ -118,7 +114,7 @@ func SetupTestEnvironment(ctx context.Context, config SetupConfig) (*TestEnviron
 	testEnv.SSHKeys.HostKeyPubPath = hostKeyPath + ".pub"
 
 	// Create target VM (pass VMM temp directory)
-	targetVM, err := setupTargetVM(ctx, testEnv, imageCachePath, vmmTempDir)
+	targetVM, err := setupTargetVM(execCtx, testEnv, imageCachePath, vmmTempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup target VM: %w", err)
 	}
@@ -127,14 +123,22 @@ func SetupTestEnvironment(ctx context.Context, config SetupConfig) (*TestEnviron
 	testEnv.ManagedResources = append(testEnv.ManagedResources, targetVM.CreatedFiles...)
 
 	// Create git server VM (pass git server temp directory)
-	gitServerVM, err := setupGitServer(ctx, testEnv, imageCachePath, config.EdgeCDRepoPath, gitServerTempDir)
+	gitServerVM, err := setupGitServer(
+		execCtx,
+		testEnv,
+		imageCachePath,
+		config.EdgeCDRepoPath,
+		gitServerTempDir,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup git server: %w", err)
 	}
 	testEnv.GitServerVM = *gitServerVM.VMMetadata
 	testEnv.GitSSHURLs = gitServerVM.GitSSHURLs
 	// Track created files from git server VM
-	testEnv.ManagedResources = append(testEnv.ManagedResources, gitServerVM.VMMetadata.CreatedFiles...)
+	testEnv.ManagedResources = append(
+		testEnv.ManagedResources,
+		gitServerVM.VMMetadata.CreatedFiles...)
 
 	// Backward compat: Track temp root directory (TempDirRoot is the primary tracker now)
 	// testEnv.TempDirs is deprecated but kept for backward compatibility
@@ -142,7 +146,7 @@ func SetupTestEnvironment(ctx context.Context, config SetupConfig) (*TestEnviron
 
 	// Update status
 	testEnv.Status = "created"
-	if err := manager.UpdateEnvironment(ctx, testEnv); err != nil {
+	if err := manager.UpdateEnvironment(execCtx, testEnv); err != nil {
 		return nil, fmt.Errorf("failed to update test environment: %w", err)
 	}
 
@@ -151,7 +155,7 @@ func SetupTestEnvironment(ctx context.Context, config SetupConfig) (*TestEnviron
 
 // setupTargetVM creates and configures the target VM for testing
 func setupTargetVM(
-	ctx context.Context,
+	execCtx execcontext.Context,
 	env *TestEnvironment,
 	imageCachePath string,
 	vmmTempDir string,
@@ -240,16 +244,10 @@ func setupTargetVM(
 // FetchTargetVMPublicKey fetches the public SSH key from the target VM that it will actually use
 // This is created by cloud-init and is the key the target VM will use for outbound connections
 func FetchTargetVMPublicKey(
-	ctx context.Context,
+	execCtx execcontext.Context,
 	metadata *vmm.VMMetadata,
 	hostKeyPath string,
 ) (string, error) {
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
-	}
-
 	// Create SSH client to target VM using host key
 	sshClient, err := ssh.NewClient(
 		metadata.IP,
@@ -262,8 +260,7 @@ func FetchTargetVMPublicKey(
 	}
 
 	// Fetch the default public key that cloud-init created
-	execCtx := execcontext.New(make(map[string]string), []string{})
-	stdout, stderr, err := sshClient.Run(execCtx, "cat ~/.ssh/id_ed25519.pub")
+	stdout, stderr, err := sshClient.Run(execCtx, "cat", "${HOME}/.ssh/id_ed25519.pub")
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch target VM public key: %w\nstderr: %s", err, stderr)
 	}
@@ -275,7 +272,7 @@ func FetchTargetVMPublicKey(
 // setupGitServer creates and configures the git server VM
 // Returns the git server status
 func setupGitServer(
-	ctx context.Context,
+	execCtx execcontext.Context,
 	env *TestEnvironment,
 	imageCachePath, edgeCDRepoPath string,
 	gitServerTempDir string,
@@ -308,18 +305,18 @@ func setupGitServer(
 	}
 
 	// Fetch target VM's actual public key (created by cloud-init)
-	targetPubKey, err := FetchTargetVMPublicKey(ctx, &env.TargetVM, env.SSHKeys.HostKeyPath)
+	targetPubKey, err := FetchTargetVMPublicKey(execCtx, &env.TargetVM, env.SSHKeys.HostKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch target VM public key: %w", err)
 	}
 
 	server.AuthorizedKeys = []string{
-		targetPubKey,                         // Target VM uses this to clone from git server
+		targetPubKey,                          // Target VM uses this to clone from git server
 		strings.TrimSpace(string(hostPubKey)), // Host uses this to SSH to git server
 	}
 
 	// Run git server (this creates the VM and sets up repositories)
-	if err := server.Run(ctx); err != nil {
+	if err := server.Run(execCtx); err != nil {
 		return nil, fmt.Errorf("failed to run git server: %w", err)
 	}
 

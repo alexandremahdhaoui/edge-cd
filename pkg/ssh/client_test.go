@@ -234,7 +234,7 @@ func TestE2ERealSSHClient(t *testing.T) {
 	}
 
 	ctx := execcontext.New(make(map[string]string), []string{})
-	stdout, stderr, err := client.Run(ctx, "echo hello from real client")
+	stdout, stderr, err := client.Run(ctx, "echo", "hello from real client")
 	if err != nil {
 		t.Fatalf("Failed to run command via real SSH client: %v\nStderr: %s", err, stderr)
 	}

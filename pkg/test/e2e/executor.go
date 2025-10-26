@@ -1,8 +1,8 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,13 +37,11 @@ type ExecutorConfig struct {
 //
 // This is the test-logic-only function that is called by both the test harness and CLI.
 // Caller must have already called SetupTestEnvironment().
-func ExecuteBootstrapTest(ctx context.Context, env *TestEnvironment, config ExecutorConfig) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
+func ExecuteBootstrapTest(
+	ctx execcontext.Context,
+	env *TestEnvironment,
+	config ExecutorConfig,
+) error {
 	// Validate inputs
 	if env == nil || env.ID == "" {
 		return fmt.Errorf("invalid test environment: nil or empty ID")
@@ -166,60 +164,63 @@ func verifyBootstrapResults(
 
 	verifications := []struct {
 		name    string
-		command string
+		command []string
 	}{
 		{
 			name:    "git package installed",
-			command: "dpkg -s git",
+			command: []string{"dpkg", "-s", "git"},
 		},
 		{
 			name:    "curl package installed",
-			command: "dpkg -s curl",
+			command: []string{"dpkg", "-s", "curl"},
 		},
 		{
 			name:    "openssh-client package installed",
-			command: "dpkg -s openssh-client",
+			command: []string{"dpkg", "-s", "openssh-client"},
 		},
 		{
 			name:    "edge-cd repository cloned",
-			command: fmt.Sprintf("[ -d %s/.git ]", edgeCDRepoPath),
+			command: []string{"[", "-d", fmt.Sprintf("%s/.git", edgeCDRepoPath), "]"},
 		},
 		{
 			name:    "user-config repository cloned",
-			command: fmt.Sprintf("[ -d %s/.git ]", userConfigRepoPath),
+			command: []string{"[", "-d", fmt.Sprintf("%s/.git", userConfigRepoPath), "]"},
 		},
 		{
 			name:    "config file placed",
-			command: "[ -f /etc/edge-cd/config.yaml ]",
+			command: []string{"[", "-f", "/etc/edge-cd/config.yaml", "]"},
 		},
 	}
 
 	// Service-specific verifications
-	if serviceManager == "systemd" {
+	switch serviceManager {
+	default:
+		panic("")
+	case "systemd":
 		verifications = append(verifications, []struct {
 			name    string
-			command string
+			command []string
 		}{
 			{
 				name:    "systemd service file created",
-				command: "[ -f /etc/systemd/system/edge-cd.service ]",
+				command: []string{"[", "-f", "/etc/systemd/system/edge-cd.service", "]"},
 			},
 			{
 				name:    "systemd service enabled",
-				command: "systemctl is-enabled edge-cd.service",
+				command: []string{"systemctl", "is-enabled", "edge-cd.service"},
 			},
 			{
 				name:    "systemd service active",
-				command: "systemctl is-active edge-cd.service",
+				command: []string{"systemctl", "is-active", "edge-cd.service"},
 			},
 		}...)
-	} else if serviceManager == "procd" {
+	case "procd":
 		verifications = append(verifications, struct {
 			name    string
-			command string
+			command []string
 		}{
 			name:    "procd init.d script created",
-			command: "[ -f /etc/init.d/edge-cd ]",
+			command: []string{"[", "-f", "/etc/init.d/edge-cd", "]"},
 		})
 	}
 
@@ -228,7 +229,7 @@ func verifyBootstrapResults(
 
 	// Run all verifications
 	for _, v := range verifications {
-		_, _, err := sshClient.Run(verifyCtx, v.command)
+		_, _, err := sshClient.Run(verifyCtx, v.command...)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("%s verification failed: %w", v.name, err))
 		}
@@ -252,7 +253,9 @@ func BuildEdgectlBinary(edgectlSourceDir string) (string, error) {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		os.RemoveAll(tmpDir)
+		if err := os.RemoveAll(tmpDir); err != nil {
+			slog.Error("error removing temp dir", "err", err.Error(), "tempDir", tmpDir)
+		}
 		return "", fmt.Errorf("failed to build edgectl binary: %w", err)
 	}
 

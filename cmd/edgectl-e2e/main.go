@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	te2e "github.com/alexandremahdhaoui/edge-cd/pkg/test/e2e"
 )
 
@@ -57,37 +57,38 @@ Examples:
 	}
 
 	command := os.Args[1]
-	ctx := context.Background()
 	artifactStoreDir := getArtifactDir()
+
+	execCtx := execcontext.New(make(map[string]string), []string{})
 
 	switch command {
 	case "create":
-		cmdCreate(ctx, artifactStoreDir)
+		cmdCreate(execCtx, artifactStoreDir)
 	case "get":
 		if len(os.Args) < 3 {
 			fmt.Fprintf(os.Stderr, "Error: 'get' requires a test ID\n")
 			fmt.Fprintf(os.Stderr, "Usage: edgectl-e2e get <test-id>\n")
 			os.Exit(1)
 		}
-		cmdGet(ctx, artifactStoreDir, os.Args[2])
+		cmdGet(execCtx, artifactStoreDir, os.Args[2])
 	case "run":
 		if len(os.Args) < 3 {
 			fmt.Fprintf(os.Stderr, "Error: 'run' requires a test ID\n")
 			fmt.Fprintf(os.Stderr, "Usage: edgectl-e2e run <test-id>\n")
 			os.Exit(1)
 		}
-		cmdRun(ctx, artifactStoreDir, os.Args[2])
+		cmdRun(execCtx, artifactStoreDir, os.Args[2])
 	case "delete":
 		if len(os.Args) < 3 {
 			fmt.Fprintf(os.Stderr, "Error: 'delete' requires a test ID\n")
 			fmt.Fprintf(os.Stderr, "Usage: edgectl-e2e delete <test-id>\n")
 			os.Exit(1)
 		}
-		cmdDelete(ctx, artifactStoreDir, os.Args[2])
+		cmdDelete(execCtx, artifactStoreDir, os.Args[2])
 	case "list":
-		cmdList(ctx, artifactStoreDir)
+		cmdList(execCtx, artifactStoreDir)
 	case "test":
-		cmdTest(ctx, artifactStoreDir)
+		cmdTest(execCtx, artifactStoreDir)
 	case "-h", "--help", "help":
 		fs.Usage()
 		os.Exit(0)
@@ -131,7 +132,10 @@ func getEdgeCDRepoPath() string {
 }
 
 // cmdCreate creates and provisions a complete test environment with VMs
-func cmdCreate(ctx context.Context, artifactStoreDir string) {
+func cmdCreate(
+	execCtx execcontext.Context,
+	artifactStoreDir string,
+) {
 	// Get paths
 	cacheDir := filepath.Join(os.TempDir(), "edgectl")
 	edgeCDRepoPath := getEdgeCDRepoPath()
@@ -146,20 +150,20 @@ func cmdCreate(ctx context.Context, artifactStoreDir string) {
 
 	// Create test environment with VMs
 	fmt.Fprintf(os.Stderr, "Creating test environment...\n")
-	testEnv, err := te2e.SetupTestEnvironment(ctx, setupConfig)
+	testEnv, err := te2e.SetupTestEnvironment(execCtx, setupConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to create test environment: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Save to artifact store
-	if err := os.MkdirAll(artifactStoreDir, 0755); err != nil {
+	if err := os.MkdirAll(artifactStoreDir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to create artifact store directory: %v\n", err)
 		os.Exit(1)
 	}
 
 	store := te2e.NewJSONArtifactStore(filepath.Join(artifactStoreDir, "artifacts.json"))
-	if err := store.Save(ctx, testEnv); err != nil {
+	if err := store.Save(execCtx, testEnv); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to save environment to artifact store: %v\n", err)
 		os.Exit(1)
 	}
@@ -175,11 +179,21 @@ func cmdCreate(ctx context.Context, artifactStoreDir string) {
 		fmt.Fprintf(os.Stderr, "\n=== Target VM ===\n")
 		fmt.Fprintf(os.Stderr, "   Name: %s\n", testEnv.TargetVM.Name)
 		fmt.Fprintf(os.Stderr, "   IP: %s\n", testEnv.TargetVM.IP)
-		fmt.Fprintf(os.Stderr, "   SSH: ssh -i %s ubuntu@%s\n", testEnv.SSHKeys.HostKeyPath, testEnv.TargetVM.IP)
+		fmt.Fprintf(
+			os.Stderr,
+			"   SSH: ssh -i %s ubuntu@%s\n",
+			testEnv.SSHKeys.HostKeyPath,
+			testEnv.TargetVM.IP,
+		)
 		fmt.Fprintf(os.Stderr, "\n=== Git Server VM ===\n")
 		fmt.Fprintf(os.Stderr, "   Name: %s\n", testEnv.GitServerVM.Name)
 		fmt.Fprintf(os.Stderr, "   IP: %s\n", testEnv.GitServerVM.IP)
-		fmt.Fprintf(os.Stderr, "   SSH: ssh -i %s git@%s\n", testEnv.SSHKeys.HostKeyPath, testEnv.GitServerVM.IP)
+		fmt.Fprintf(
+			os.Stderr,
+			"   SSH: ssh -i %s git@%s\n",
+			testEnv.SSHKeys.HostKeyPath,
+			testEnv.GitServerVM.IP,
+		)
 		fmt.Fprintf(os.Stderr, "\n=== Git Repositories ===\n")
 		for repoName, repoURL := range testEnv.GitSSHURLs {
 			fmt.Fprintf(os.Stderr, "   %s: %s\n", repoName, repoURL)
@@ -190,7 +204,7 @@ func cmdCreate(ctx context.Context, artifactStoreDir string) {
 }
 
 // cmdRun executes bootstrap tests in an existing environment
-func cmdRun(ctx context.Context, artifactStoreDir string, testID string) {
+func cmdRun(ctx execcontext.Context, artifactStoreDir string, testID string) {
 	artifactStoreFile := filepath.Join(artifactStoreDir, "artifacts.json")
 	store := te2e.NewJSONArtifactStore(artifactStoreFile)
 
@@ -255,7 +269,7 @@ func cmdRun(ctx context.Context, artifactStoreDir string, testID string) {
 }
 
 // cmdDelete destroys a test environment and cleans up all resources
-func cmdDelete(ctx context.Context, artifactStoreDir string, testID string) {
+func cmdDelete(ctx execcontext.Context, artifactStoreDir string, testID string) {
 	artifactStoreFile := filepath.Join(artifactStoreDir, "artifacts.json")
 	store := te2e.NewJSONArtifactStore(artifactStoreFile)
 
@@ -272,7 +286,11 @@ func cmdDelete(ctx context.Context, artifactStoreDir string, testID string) {
 	if env.TempDirRoot != "" {
 		fmt.Printf("  Validating temp directory: %s\n", env.TempDirRoot)
 		if !te2e.IsManagedTempDirectory(env.TempDirRoot) {
-			fmt.Fprintf(os.Stderr, "Warning: temp directory is not marked as managed (%s), proceeding with caution\n", env.TempDirRoot)
+			fmt.Fprintf(
+				os.Stderr,
+				"Warning: temp directory is not marked as managed (%s), proceeding with caution\n",
+				env.TempDirRoot,
+			)
 		}
 	}
 
@@ -323,7 +341,7 @@ func cmdDelete(ctx context.Context, artifactStoreDir string, testID string) {
 }
 
 // cmdGet displays complete information about a test environment
-func cmdGet(ctx context.Context, artifactStoreDir string, testID string) {
+func cmdGet(ctx execcontext.Context, artifactStoreDir string, testID string) {
 	artifactStoreFile := filepath.Join(artifactStoreDir, "artifacts.json")
 	store := te2e.NewJSONArtifactStore(artifactStoreFile)
 
@@ -344,7 +362,12 @@ func cmdGet(ctx context.Context, artifactStoreDir string, testID string) {
 	fmt.Fprintf(os.Stderr, "Name: %s\n", env.TargetVM.Name)
 	fmt.Fprintf(os.Stderr, "IP: %s\n", env.TargetVM.IP)
 	if env.TargetVM.IP != "" {
-		fmt.Fprintf(os.Stderr, "SSH: ssh -i %s ubuntu@%s\n", env.SSHKeys.HostKeyPath, env.TargetVM.IP)
+		fmt.Fprintf(
+			os.Stderr,
+			"SSH: ssh -i %s ubuntu@%s\n",
+			env.SSHKeys.HostKeyPath,
+			env.TargetVM.IP,
+		)
 	}
 	fmt.Fprintf(os.Stderr, "Memory: %dMiB\n", env.TargetVM.MemoryMB)
 	fmt.Fprintf(os.Stderr, "vCPUs: %d\n\n", env.TargetVM.VCPUs)
@@ -353,7 +376,12 @@ func cmdGet(ctx context.Context, artifactStoreDir string, testID string) {
 	fmt.Fprintf(os.Stderr, "Name: %s\n", env.GitServerVM.Name)
 	fmt.Fprintf(os.Stderr, "IP: %s\n", env.GitServerVM.IP)
 	if env.GitServerVM.IP != "" {
-		fmt.Fprintf(os.Stderr, "SSH: ssh -i %s git@%s\n", env.SSHKeys.HostKeyPath, env.GitServerVM.IP)
+		fmt.Fprintf(
+			os.Stderr,
+			"SSH: ssh -i %s git@%s\n",
+			env.SSHKeys.HostKeyPath,
+			env.GitServerVM.IP,
+		)
 	}
 	fmt.Fprintf(os.Stderr, "Memory: %dMiB\n", env.GitServerVM.MemoryMB)
 	fmt.Fprintf(os.Stderr, "vCPUs: %d\n\n", env.GitServerVM.VCPUs)
@@ -372,7 +400,7 @@ func cmdGet(ctx context.Context, artifactStoreDir string, testID string) {
 }
 
 // cmdList lists all test environments
-func cmdList(ctx context.Context, artifactStoreDir string) {
+func cmdList(ctx execcontext.Context, artifactStoreDir string) {
 	artifactStoreFile := filepath.Join(artifactStoreDir, "artifacts.json")
 	store := te2e.NewJSONArtifactStore(artifactStoreFile)
 
@@ -403,14 +431,22 @@ func cmdList(ctx context.Context, artifactStoreDir string) {
 		if gitServerVM == "" {
 			gitServerVM = "(none)"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", env.ID, env.Status, createdStr, targetVM, gitServerVM)
+		fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\t%s\t%s\n",
+			env.ID,
+			env.Status,
+			createdStr,
+			targetVM,
+			gitServerVM,
+		)
 	}
 
 	w.Flush()
 }
 
 // cmdTest runs a one-shot test (create → run → delete)
-func cmdTest(ctx context.Context, artifactStoreDir string) {
+func cmdTest(ctx execcontext.Context, artifactStoreDir string) {
 	fmt.Println("Running one-shot e2e test...")
 
 	// Get paths
@@ -433,7 +469,7 @@ func cmdTest(ctx context.Context, artifactStoreDir string) {
 	}
 
 	// Save to artifact store
-	if err := os.MkdirAll(artifactStoreDir, 0755); err != nil {
+	if err := os.MkdirAll(artifactStoreDir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to create artifact store directory: %v\n", err)
 		os.Exit(1)
 	}
