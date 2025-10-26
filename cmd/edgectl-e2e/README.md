@@ -320,7 +320,8 @@ rm -rf /tmp/e2e-20231025-abc123/
 
 ## See Also
 
-- `test/edgectl/e2e/README.md` - E2E testing guide
-- `go test ./test/edgectl/e2e -v` - Run tests programmatically
-- `virsh list --all` - List all VMs
-- `virsh console <VM_NAME>` - Access VM console
+*   [Main `README.md`](../../README.md)
+*   `test/edgectl/e2e/README.md` - E2E testing guide
+*   `go test ./test/edgectl/e2e -v` - Run tests programmatically
+*   `virsh list --all` - List all VMs
+*   `virsh console <VM_NAME>` - Access VM console
