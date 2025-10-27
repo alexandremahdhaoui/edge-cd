@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +14,6 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/gitserver"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
-	"sigs.k8s.io/yaml"
 )
 
 // SetupConfig contains configuration for test environment setup
@@ -169,18 +169,10 @@ func setupTargetVM(
 	// Create ubuntu user with host's public key in authorized_keys
 	ubuntuUser := cloudinit.NewUserWithAuthorizedKeys("ubuntu", []string{string(hostPubKey)})
 
-	// Configure SSH for git operations
-	sshConfig := cloudinit.WriteFile{
-		Path:        "/home/ubuntu/.ssh/config",
-		Content:     "Host *\n    IdentityFile ~/.ssh/id_ed25519\n    StrictHostKeyChecking no\n    UserKnownHostsFile=/dev/null\n",
-		Permissions: "0600",
-	}
-
 	// Setup cloud-init user data
 	userData := cloudinit.UserData{
-		Hostname:   fmt.Sprintf("test-target-%s", env.ID),
-		Users:      []cloudinit.User{ubuntuUser},
-		WriteFiles: []cloudinit.WriteFile{sshConfig},
+		Hostname: fmt.Sprintf("test-target-%s", env.ID),
+		Users:    []cloudinit.User{ubuntuUser},
 		RunCommands: []string{
 			"KEY_PATH='/home/ubuntu/.ssh/id_ed25519'",
 			"USER_HOME='/home/ubuntu'",
@@ -189,8 +181,6 @@ func setupTargetVM(
 			"/usr/bin/ssh-keygen -t ed25519 -N \"\" -f ${KEY_PATH} -q",
 			"chown ubuntu:ubuntu -R ${USER_HOME}",
 			"chmod 600 ${KEY_PATH}",
-			// Configure SSH server to accept GIT_SSH_COMMAND environment variable
-			"echo 'AcceptEnv GIT_SSH_COMMAND' >> /etc/ssh/sshd_config",
 			"systemctl restart sshd",
 		},
 	}
@@ -215,9 +205,6 @@ func setupTargetVM(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create target VM: %w", err)
 	}
-
-	b, _ := yaml.Marshal(metadata)
-	fmt.Println(string(b))
 
 	if metadata.IP == "" {
 		return nil, fmt.Errorf("target VM created but no IP address available")
@@ -260,13 +247,15 @@ func FetchTargetVMPublicKey(
 	}
 
 	// Fetch the default public key that cloud-init created
-	stdout, stderr, err := sshClient.Run(execCtx, "cat", "${HOME}/.ssh/id_ed25519.pub")
+	publicKey, stderr, err := sshClient.Run(execCtx, "cat", "${HOME}/.ssh/id_ed25519.pub")
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch target VM public key: %w\nstderr: %s", err, stderr)
 	}
 
+	slog.Info("successfully fetched public key", "publicKey", publicKey, "fromIp", metadata.IP)
+
 	// Trim whitespace to ensure proper formatting in authorized_keys
-	return strings.TrimSpace(stdout), nil
+	return publicKey, nil
 }
 
 // setupGitServer creates and configures the git server VM

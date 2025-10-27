@@ -79,10 +79,14 @@ func RenderConfig(data ConfigTemplateData) (string, error) {
 }
 
 // PlaceConfigYAML takes the rendered config content and places it on the remote device.
-func PlaceConfigYAML(execCtx execcontext.Context, runner ssh.Runner, content, destPath string) error {
+func PlaceConfigYAML(
+	execCtx execcontext.Context,
+	runner ssh.Runner,
+	content, destPath string,
+) error {
 	// Use printf to handle newlines and special characters correctly
-	cmd := fmt.Sprintf("printf %%s '%s' > %s", content, destPath)
-	stdout, stderr, err := runner.Run(execCtx, cmd)
+	cmd := []string{"printf", "%s", content, ">", destPath}
+	stdout, stderr, err := runner.Run(execCtx, cmd...)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to place config.yaml at %s: %w. Stdout: %s, Stderr: %s",
@@ -104,5 +108,3 @@ func ReadLocalConfig(configPath, configSpec string) (string, error) {
 	}
 	return string(content), nil
 }
-
-

@@ -3,8 +3,10 @@ package vmm
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -346,6 +348,25 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 	if cloudInitISOPath != "" {
 		createdFiles = append(createdFiles, cloudInitISOPath)
 	}
+
+	var (
+		user           cloudinit.User
+		authorizedKeys string
+	)
+	if len(cfg.UserData.Users) > 0 {
+		user = cfg.UserData.Users[0]
+		b, _ := json.Marshal(user.SSHAuthorizedKeys)
+		authorizedKeys = string(b)
+	}
+
+	slog.Info(
+		"successfully created VM",
+		"vmName", cfg.Name,
+		"ip", ipAddress,
+		"hostname", cfg.UserData.Hostname,
+		"userName", user.Name,
+		"authorizedKeys", authorizedKeys,
+	)
 
 	// Return metadata about the created VM
 	return &VMMetadata{

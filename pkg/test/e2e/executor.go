@@ -99,7 +99,7 @@ func ExecuteBootstrapTest(
 	remoteEdgeCDRepoDestPath := "/home/ubuntu/edge-cd"
 	remoteUserConfigRepoDestPath := "/home/ubuntu/edge-cd-config"
 
-	injectEnv := "GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+	injectEnv := "GIT_SSH_COMMAND=ssh -i /home/ubuntu/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 	// Build bootstrap command
 	cmd := exec.Command(

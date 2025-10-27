@@ -162,9 +162,6 @@ func main() {
 		// targetExecCtx: for remote commands requiring privilege escalation (sudo -E)
 		targetExecCtx := execcontext.New(targetInjectedEnvs, []string{"sudo", "-E"})
 
-		// localExecCtx: for local git operations without privilege escalation
-		localExecCtx := execcontext.New(nil, nil)
-
 		// Clone edge-cd repo locally to get package manager configs
 		localEdgeCDRepoTempDir, err := os.MkdirTemp("", "edgectl-local-edge-cd-repo-")
 		if err != nil {
@@ -194,14 +191,11 @@ func main() {
 			}
 		}
 
-		// Repo Cloning (only user config configGitRepo needs to be cloned here, edge-cd configGitRepo is handled in ProvisionPackages)
-		// Note: Git operations run as the target user and don't need privilege escalation
-		// They use localExecCtx which has only the environment variables, no sudo
 		configGitRepo := provision.GitRepo{
 			URL:    *configRepo,
 			Branch: *configBranch,
 		}
-		if err := provision.CloneOrPullRepo(localExecCtx, sshClient, userConfigRepoPath, configGitRepo); err != nil {
+		if err := provision.CloneOrPullRepo(targetExecCtx, sshClient, userConfigRepoPath, configGitRepo); err != nil {
 			log.Fatalf("Failed to clone user config repo: %v", err)
 		}
 
