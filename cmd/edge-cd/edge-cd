@@ -329,36 +329,27 @@ function reconcile_files() {
 function reconcile_edge_cd() {
 	logInfo "Reconciling EdgeCD"
 
-	local sourcePath="${EDGE_CD_REPO_DESTINATION_PATH}/cmd/edge-cd"
 	local name=edge-cd
-
-	local srcPath
-	local destPath
-	local fileMod
-	local restartServices
-	local requireReboot
-
-	# -- Always sync the scripts and service
-	srcPath="${sourcePath}/${name}"
-	destPath="/usr/bin/${name}"
-	fileMod=731
-	restartServices="${name}"
-	requireReboot=false
-	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
-
-	# -- Ensure edge-cd is always enabled
-	srcPath="$(__get_svc_mgr_path)/service"
-	destPath="/etc/init.d/${name}"
-	fileMod=755
-	restartServices="${name}"
-	requireReboot=false
-	__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
-	enable_service "${name}"
-
-	# -- Check if there was a new commit.
 	local lastCommit currentCommit
-	lastCommit=$(cat "${EDGE_CD_COMMIT_PATH}" || echo "")
+
+	# -- Get last synced commit and current commit
+	lastCommit=$(cat "${EDGE_CD_COMMIT_PATH}" 2>/dev/null || echo "")
 	currentCommit="$(git -C "${EDGE_CD_REPO_DESTINATION_PATH}" rev-parse HEAD)"
+
+	# -- Check if edge-cd script has changed between commits
+	if [ -n "${lastCommit}" ] && [ "${lastCommit}" != "${currentCommit}" ]; then
+		if git -C "${EDGE_CD_REPO_DESTINATION_PATH}" diff --name-only "${lastCommit}" "${currentCommit}" | grep -q "^cmd/edge-cd/edge-cd$"; then
+			logInfo "EdgeCD script has changed, marking service for restart"
+			RTV_REQUIRE_SERVICE_RESTART+="${name}\n"
+		fi
+	fi
+
+	# -- Ensure edge-cd service is always enabled (if service file exists)
+	if [ -f "/etc/init.d/${name}" ]; then
+		enable_service "${name}"
+	else
+		logInfo "Service file /etc/init.d/${name} does not exist, skipping service enable"
+	fi
 
 	# -- Commit this change
 	mkdir -p "$(dirname "${EDGE_CD_COMMIT_PATH}")"

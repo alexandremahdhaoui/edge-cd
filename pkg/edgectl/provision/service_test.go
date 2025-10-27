@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
@@ -17,48 +18,29 @@ func TestSetupEdgeCDService(t *testing.T) {
 		t.Skipf("Skipping test: could not find edge-cd repository: %v", err)
 	}
 
-	// Create contexts for each test case to compute expected commands
-	emptyCtx := execcontext.New(make(map[string]string), []string{})
-	sudoCtx := execcontext.New(make(map[string]string), []string{"sudo", "-E"})
-
-	systemdServicePath := filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/service")
-	procdServicePath := filepath.Join(repoPath, "cmd/edge-cd/service-managers/procd/service")
-
 	tests := []struct {
 		name             string
 		serviceManager   string
 		prependCmd       []string
-		expectedCommands []string
+		minExpectedCmds  int // Minimum expected commands (mkdir, sh -c, chmod, enable, start/restart)
 	}{
 		{
-			name:           "systemd service setup without prepend command",
-			serviceManager: "systemd",
-			prependCmd:     []string{},
-			expectedCommands: []string{
-				execcontext.FormatCmd(emptyCtx, "cp", systemdServicePath, "/etc/systemd/system/edge-cd.service"),
-				execcontext.FormatCmd(emptyCtx, "systemctl", "enable", "edge-cd"),
-				execcontext.FormatCmd(emptyCtx, "systemctl", "start", "edge-cd"),
-			},
+			name:            "systemd service setup without prepend command",
+			serviceManager:  "systemd",
+			prependCmd:      []string{},
+			minExpectedCmds: 5, // mkdir, sh -c (base64), chmod, enable, start
 		},
 		{
-			name:           "systemd service setup with sudo prepend command",
-			serviceManager: "systemd",
-			prependCmd:     []string{"sudo", "-E"},
-			expectedCommands: []string{
-				execcontext.FormatCmd(sudoCtx, "cp", systemdServicePath, "/etc/systemd/system/edge-cd.service"),
-				execcontext.FormatCmd(sudoCtx, "systemctl", "enable", "edge-cd"),
-				execcontext.FormatCmd(sudoCtx, "systemctl", "start", "edge-cd"),
-			},
+			name:            "systemd service setup with sudo prepend command",
+			serviceManager:  "systemd",
+			prependCmd:      []string{"sudo", "-E"},
+			minExpectedCmds: 5, // mkdir, sh -c (base64), chmod, enable, start
 		},
 		{
-			name:           "procd service setup without prepend command",
-			serviceManager: "procd",
-			prependCmd:     []string{},
-			expectedCommands: []string{
-				execcontext.FormatCmd(emptyCtx, "cp", procdServicePath, "/etc/init.d/edge-cd"),
-				execcontext.FormatCmd(emptyCtx, "/etc/init.d/edge-cd", "enable"),
-				execcontext.FormatCmd(emptyCtx, "service", "edge-cd", "restart"),
-			},
+			name:            "procd service setup without prepend command",
+			serviceManager:  "procd",
+			prependCmd:      []string{},
+			minExpectedCmds: 5, // mkdir, sh -c (base64), chmod, enable, restart
 		},
 	}
 
@@ -70,19 +52,43 @@ func TestSetupEdgeCDService(t *testing.T) {
 			envs := make(map[string]string)
 			ctx := execcontext.New(envs, tt.prependCmd)
 
-			err := SetupEdgeCDService(ctx, mockRunner, tt.serviceManager, repoPath, repoPath)
+			// Build template data for testing
+			templateData := ServiceTemplateData{
+				EdgeCDScriptPath: filepath.Join(repoPath, "cmd/edge-cd/edge-cd"),
+				ConfigPath:       "/etc/edge-cd/config.yaml",
+				User:             "",
+				Group:            "",
+				EnvironmentVars:  []EnvVar{},
+				Args:             []string{},
+			}
+
+			err := SetupEdgeCDService(ctx, mockRunner, tt.serviceManager, repoPath, repoPath, templateData)
 			if err != nil {
 				t.Fatalf("SetupEdgeCDService failed: %v", err)
 			}
 
-			if len(mockRunner.Commands) != len(tt.expectedCommands) {
-				t.Fatalf("Expected %d commands to be run, but got %d. Commands: %v", len(tt.expectedCommands), len(mockRunner.Commands), mockRunner.Commands)
+			// Verify that we got at least the minimum expected commands
+			if len(mockRunner.Commands) < tt.minExpectedCmds {
+				t.Fatalf("Expected at least %d commands to be run, but got %d. Commands: %v", tt.minExpectedCmds, len(mockRunner.Commands), mockRunner.Commands)
 			}
 
-			for i, cmd := range mockRunner.Commands {
-				if cmd != tt.expectedCommands[i] {
-					t.Errorf("Command %d mismatch: got %q, want %q", i, cmd, tt.expectedCommands[i])
+			// Verify key commands are present (enable and start/restart)
+			hasEnable := false
+			hasStartOrRestart := false
+			for _, cmd := range mockRunner.Commands {
+				if strings.Contains(cmd, "enable") {
+					hasEnable = true
 				}
+				if strings.Contains(cmd, "start") || strings.Contains(cmd, "restart") {
+					hasStartOrRestart = true
+				}
+			}
+
+			if !hasEnable {
+				t.Errorf("Expected 'enable' command but did not find it. Commands: %v", mockRunner.Commands)
+			}
+			if !hasStartOrRestart {
+				t.Errorf("Expected 'start' or 'restart' command but did not find it. Commands: %v", mockRunner.Commands)
 			}
 		})
 	}

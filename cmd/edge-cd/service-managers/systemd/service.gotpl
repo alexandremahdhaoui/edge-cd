@@ -17,9 +17,20 @@ Description=EdgeCD Service
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/edge-cd
+ExecStart={{ .EdgeCDScriptPath }}{{range .Args}} {{.}}{{end}}
 Restart=always
-Environment=CONFIG_PATH=/etc/edge-cd/config.yaml
+{{- if .User }}
+User={{ .User }}
+{{- end }}
+{{- if .Group }}
+Group={{ .Group }}
+{{- end }}
+{{- if .ConfigPath }}
+Environment=CONFIG_PATH={{ .ConfigPath }}
+{{- end }}
+{{- range .EnvironmentVars }}
+Environment={{.Key}}={{.Value}}
+{{- end }}
 
 [Install]
 WantedBy=multi-user.target

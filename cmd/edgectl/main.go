@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/edgectl/provision"
@@ -250,6 +251,7 @@ func main() {
 		} else {
 			configData := provision.ConfigTemplateData{
 				EdgeCDRepoURL:      *edgeCDRepo,
+				EdgeCDRepoDestPath: remoteEdgeCDRepoDestPath,
 				ConfigRepoURL:      *configRepo,
 				ServiceManagerName: *serviceManager,
 				PackageManagerName: *packageManager,
@@ -267,8 +269,18 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Build service template data
+		serviceTemplateData := provision.ServiceTemplateData{
+			EdgeCDScriptPath: filepath.Join(remoteEdgeCDRepoDestPath, "cmd/edge-cd/edge-cd"),
+			ConfigPath:       "/etc/edge-cd/config.yaml",
+			User:             "", // Optional: will be omitted if empty
+			Group:            "", // Optional: will be omitted if empty
+			EnvironmentVars:  []provision.EnvVar{}, // Optional: can be extended later
+			Args:             []string{}, // Optional: can be extended later
+		}
+
 		// Service Setup
-		if err := provision.SetupEdgeCDService(targetExecCtx, sshClient, *serviceManager, localEdgeCDRepoTempDir, remoteEdgeCDRepoDestPath); err != nil {
+		if err := provision.SetupEdgeCDService(targetExecCtx, sshClient, *serviceManager, localEdgeCDRepoTempDir, remoteEdgeCDRepoDestPath, serviceTemplateData); err != nil {
 			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errSetupService).Error())
 			os.Exit(1)
 		}

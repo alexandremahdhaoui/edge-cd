@@ -2,6 +2,7 @@ package provision
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -28,7 +29,7 @@ edgectl:
   repo:
     url: "{{ .EdgeCDRepoURL }}"
     branch: "main" # Assuming default branch for now
-    destinationPath: "/usr/local/src/edge-cd" # Assuming default path for now
+    destinationPath: "{{ .EdgeCDRepoDestPath }}"
 
 config:
   spec: "spec.yaml"
@@ -65,6 +66,7 @@ files: []
 // ConfigTemplateData holds the data for rendering the config.yaml template.
 type ConfigTemplateData struct {
 	EdgeCDRepoURL      string
+	EdgeCDRepoDestPath string
 	ConfigRepoURL      string
 	ServiceManagerName string
 	PackageManagerName string
@@ -100,9 +102,10 @@ func PlaceConfigYAML(
 		return flaterrors.Join(err, fmt.Errorf("dirPath=%s stdout=%s stderr=%s", dirPath, stdout, stderr), errPlaceConfigYAML)
 	}
 
-	// Use sh -c to handle redirection properly
-	shellCmd := fmt.Sprintf("printf '%%s' > %s", destPath)
-	stdout, stderr, err = runner.Run(execCtx, "sh", "-c", shellCmd, "--", content)
+	// Use base64 encoding to safely transfer content (avoids all escaping issues)
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+	shellCmd := fmt.Sprintf("echo %s | base64 -d > %s", encoded, destPath)
+	stdout, stderr, err = runner.Run(execCtx, "sh", "-c", shellCmd)
 	if err != nil {
 		return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", destPath, stdout, stderr), errPlaceConfigYAML)
 	}
