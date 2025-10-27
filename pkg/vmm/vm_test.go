@@ -12,6 +12,7 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/cloudinit"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/test/testutils"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
 )
 
@@ -25,6 +26,10 @@ func TestVMMStructLifecycle(t *testing.T) {
 
 	// Create a temporary directory for test artifacts
 	tempDir := t.TempDir()
+
+	// Create subdirectory with permissions for libvirt to access VM disk files
+	vmBaseDir := testutils.PrepareLibvirtDir(t, tempDir, "vm-disks")
+
 	cacheDir := filepath.Join(os.TempDir(), "edgectl")
 	fmt.Println(cacheDir)
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
@@ -104,8 +109,8 @@ WantedBy=multi-user.target`,
 		},
 	}
 
-	// Define virtiofs share for the VM
-	virtiofsSharePath := filepath.Join(tempDir, "virtiofs_share")
+	// Define virtiofs share for the VM (must be in vmBaseDir so libvirt can access it)
+	virtiofsSharePath := filepath.Join(vmBaseDir, "virtiofs_share")
 	if err := os.MkdirAll(virtiofsSharePath, 0o755); err != nil {
 		t.Fatalf("Failed to create virtiofs share directory: %v", err)
 	}
@@ -125,6 +130,7 @@ WantedBy=multi-user.target`,
 			MountPoint: virtiofsSharePath,
 		},
 	}
+	cfg.TempDir = vmBaseDir // Set VM temp dir to the libvirt-accessible directory
 
 	vmmInstance, err := vmm.NewVMM()
 	if err != nil {

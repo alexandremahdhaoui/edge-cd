@@ -12,6 +12,7 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/gitserver"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/test/testutils"
 )
 
 // downloadVMImage downloads the Ubuntu cloud image if it doesn't exist
@@ -113,10 +114,13 @@ func TestGitServerLifecycle(t *testing.T) {
 	// Create a temporary directory for the Git server's base directory and VM artifacts
 	tempDir := t.TempDir()
 
+	// Create subdirectory with permissions for libvirt to access VM disk files
+	vmBaseDir := testutils.PrepareLibvirtDir(t, tempDir, "vm-disks")
+
 	// Download image if not exists
 	imageCachePath := downloadVMImage(t)
 
-	server := gitserver.NewServer(tempDir, imageCachePath, []gitserver.Repo{})
+	server := gitserver.NewServer(vmBaseDir, imageCachePath, []gitserver.Repo{})
 
 	// Generate a dummy host SSH key for the test client to connect to the Git server VM
 	clientKeyPath := filepath.Join(tempDir, "id_rsa_client")
@@ -179,6 +183,9 @@ func TestGitServerWithRepo(t *testing.T) {
 	// Create a temporary directory for the Git server's base directory and VM artifacts
 	tempDir := t.TempDir()
 
+	// Create subdirectory with permissions for libvirt to access VM disk files
+	vmBaseDir := testutils.PrepareLibvirtDir(t, tempDir, "vm-disks")
+
 	// Download image if not exists
 	imageCachePath := downloadVMImage(t)
 
@@ -200,7 +207,7 @@ func TestGitServerWithRepo(t *testing.T) {
 		},
 	}
 
-	server := gitserver.NewServer(tempDir, imageCachePath, repos)
+	server := gitserver.NewServer(vmBaseDir, imageCachePath, repos)
 
 	// Generate a dummy host SSH key for the test client to connect to the Git server VM
 	clientKeyPath := filepath.Join(tempDir, "id_rsa_client")

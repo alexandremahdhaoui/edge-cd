@@ -148,11 +148,8 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 	if output, err := qemuImgCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("failed to create VM disk: %w\nOutput: %s", err, output)
 	}
-	// Note: vmDiskPath is deleted in DestroyVM, not here
-	// This allows the VM to keep using the disk while running
 
 	var filesystems []libvirtxml.DomainFilesystem
-
 	for _, fs := range cfg.VirtioFS {
 		// libvirt will manage virtiofsd, so we don't start it manually here.
 		// We only need to configure the DomainFilesystem.
@@ -366,7 +363,6 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 // First checks the in-memory domains map for efficiency.
 // If not found in memory, queries libvirt directly (critical for cleanup when using new VMM instances).
 func (v *VMM) DomainExists(ctx execcontext.Context, name string) (bool, error) {
-
 	// Check in-memory map first (optimization)
 	dom, ok := v.domains[name]
 	if ok && dom != nil {
@@ -401,8 +397,11 @@ func (v *VMM) DomainExists(ctx execcontext.Context, name string) (bool, error) {
 
 // GetDomainIP retrieves the IP address of a running VM
 // Polls with backoff up to the specified timeout duration
-func (v *VMM) GetDomainIP(ctx execcontext.Context, name string, timeout time.Duration) (string, error) {
-
+func (v *VMM) GetDomainIP(
+	ctx execcontext.Context,
+	name string,
+	timeout time.Duration,
+) (string, error) {
 	dom, ok := v.domains[name]
 	if !ok || dom == nil {
 		return "", fmt.Errorf("VM %s not found or not running", name)
@@ -447,7 +446,6 @@ func (v *VMM) GetDomainIP(ctx execcontext.Context, name string, timeout time.Dur
 
 // GetDomainXML returns the full XML definition of a domain
 func (v *VMM) GetDomainXML(ctx execcontext.Context, name string) (string, error) {
-
 	dom, ok := v.domains[name]
 	if !ok || dom == nil {
 		return "", fmt.Errorf("VM %s not found", name)
@@ -465,7 +463,6 @@ func (v *VMM) GetDomainXML(ctx execcontext.Context, name string) (string, error)
 // This helper function supports cleanup scenarios where a new VMM instance is created
 // Returns nil if domain does not exist (allows idempotent cleanup)
 func (v *VMM) GetDomainByName(ctx execcontext.Context, name string) (*libvirt.Domain, error) {
-
 	// Check in-memory map first (optimization)
 	if dom, ok := v.domains[name]; ok && dom != nil {
 		return dom, nil
@@ -494,7 +491,6 @@ func (v *VMM) GetDomainByName(ctx execcontext.Context, name string) (*libvirt.Do
 // This stops the VM, undefines it in libvirt, and deletes its disk files
 // Caller is responsible for deciding whether to call this
 func (v *VMM) DestroyVM(ctx execcontext.Context, vmName string) error {
-
 	// Get domain handle (checks memory first, then queries libvirt)
 	// GetDomainByName returns nil if domain doesn't exist (for idempotent cleanup)
 	dom, err := v.GetDomainByName(ctx, vmName)
@@ -630,7 +626,10 @@ func (v *VMM) GetVMIPAddress(vmName string) (string, error) {
 					}
 				}
 			}
-			fmt.Printf("VM %s IP address not found in libvirt interface addresses, retrying...\n", vmName)
+			fmt.Printf(
+				"VM %s IP address not found in libvirt interface addresses, retrying...\n",
+				vmName,
+			)
 		}
 	}
 }

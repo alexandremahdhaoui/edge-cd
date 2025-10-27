@@ -59,20 +59,38 @@ func ApplyToCmd(ctx Context, cmd *exec.Cmd) {
 }
 
 func FormatCmd(ctx Context, cmd ...string) string {
-	envs := make([]string, 0)
+	out := ""
+
 	// Add environment variables first (without quoting the entire assignment)
 	for k, v := range ctx.Envs() {
-		envs = append(envs, fmt.Sprintf("%s=%q", k, v))
+		envStr := fmt.Sprintf("%s=%q", k, v)
+		out = fmt.Sprintf("%s%s ", out, envStr)
 	}
 
-	out := ""
-	tmp := append(envs, ctx.PrependCmd()...)
-	for _, s := range append(tmp, cmd...) {
+	// Add prepend command
+	for _, s := range ctx.PrependCmd() {
 		out = safelyAppendToCmd(out, s)
 	}
+
+	// Add the actual command
+	for _, s := range cmd {
+		out = safelyAppendToCmd(out, s)
+	}
+
 	return strings.TrimSpace(out)
 }
 
+var unquottable = map[string]struct{}{
+	"&&": {},
+	"||": {},
+	";":  {},
+	":":  {},
+	"&":  {},
+}
+
 func safelyAppendToCmd(cmd string, s string) string {
-	return fmt.Sprintf("%s%s ", cmd, s)
+	if _, ok := unquottable[s]; ok {
+		return fmt.Sprintf("%s%s ", cmd, s)
+	}
+	return fmt.Sprintf("%s%q ", cmd, s)
 }
