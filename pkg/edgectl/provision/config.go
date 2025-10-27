@@ -93,9 +93,16 @@ func PlaceConfigYAML(
 	runner ssh.Runner,
 	content, destPath string,
 ) error {
-	// Use printf to handle newlines and special characters correctly
-	cmd := []string{"printf", "%s", content, ">", destPath}
-	stdout, stderr, err := runner.Run(execCtx, cmd...)
+	// Create the directory first
+	dirPath := filepath.Dir(destPath)
+	stdout, stderr, err := runner.Run(execCtx, "mkdir", "-p", dirPath)
+	if err != nil {
+		return flaterrors.Join(err, fmt.Errorf("dirPath=%s stdout=%s stderr=%s", dirPath, stdout, stderr), errPlaceConfigYAML)
+	}
+
+	// Use sh -c to handle redirection properly
+	shellCmd := fmt.Sprintf("printf '%%s' > %s", destPath)
+	stdout, stderr, err = runner.Run(execCtx, "sh", "-c", shellCmd, "--", content)
 	if err != nil {
 		return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", destPath, stdout, stderr), errPlaceConfigYAML)
 	}

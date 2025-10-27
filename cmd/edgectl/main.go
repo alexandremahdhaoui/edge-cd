@@ -153,7 +153,11 @@ func main() {
 		// SSH Client
 		sshClient, err := ssh.NewClient(*targetAddr, *targetUser, *sshPrivateKey, "22")
 		if err != nil {
-			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errCreateSSHClient).Error())
+			slog.Error(
+				"bootstrap failed",
+				"error",
+				flaterrors.Join(err, errCreateSSHClient).Error(),
+			)
 			os.Exit(1)
 		}
 
@@ -200,11 +204,20 @@ func main() {
 			os.Exit(1)
 		}
 
+		// type yolo struct {
+		//	TargetExecCtx execcontext.Context
+		//	LocalExecCtx execcontext.Context
+		//}
+
 		// Package Provisioning
 		pkgs := strings.Split(*packages, ",")
 		if len(pkgs) > 0 {
 			if err := provision.ProvisionPackages(targetExecCtx, sshClient, pkgs, *packageManager, localEdgeCDRepoTempDir, *edgeCDRepo, remoteEdgeCDRepoDestPath); err != nil {
-				slog.Error("bootstrap failed", "error", flaterrors.Join(err, errProvisionPackages).Error())
+				slog.Error(
+					"bootstrap failed",
+					"error",
+					flaterrors.Join(err, errProvisionPackages).Error(),
+				)
 				os.Exit(1)
 			}
 		}
@@ -214,7 +227,11 @@ func main() {
 			Branch: *configBranch,
 		}
 		if err := provision.CloneOrPullRepo(targetExecCtx, sshClient, userConfigRepoPath, configGitRepo); err != nil {
-			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errCloneUserConfigRepo).Error())
+			slog.Error(
+				"bootstrap failed",
+				"error",
+				flaterrors.Join(err, errCloneUserConfigRepo).Error(),
+			)
 			os.Exit(1)
 		}
 
@@ -223,7 +240,11 @@ func main() {
 		if *configPath != "" && *configSpec != "" {
 			configContent, err = provision.ReadLocalConfig(*configPath, *configSpec)
 			if err != nil {
-				slog.Error("bootstrap failed", "error", flaterrors.Join(err, errReadLocalConfig).Error())
+				slog.Error(
+					"bootstrap failed",
+					"error",
+					flaterrors.Join(err, errReadLocalConfig).Error(),
+				)
 				os.Exit(1)
 			}
 		} else {
@@ -247,7 +268,7 @@ func main() {
 		}
 
 		// Service Setup
-		if err := provision.SetupEdgeCDService(targetExecCtx, sshClient, *serviceManager, localEdgeCDRepoTempDir); err != nil {
+		if err := provision.SetupEdgeCDService(targetExecCtx, sshClient, *serviceManager, localEdgeCDRepoTempDir, remoteEdgeCDRepoDestPath); err != nil {
 			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errSetupService).Error())
 			os.Exit(1)
 		}

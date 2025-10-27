@@ -122,6 +122,6 @@ func (c *Client) AwaitServer(timeout time.Duration) error {
 
 func runFuncAndLogErr(f func() error) {
 	if err := f(); err != nil {
-		slog.Error("error closing ssh session or connection", "err", err.Error())
+		slog.Debug("error closing ssh session or connection", "err", err.Error())
 	}
 }

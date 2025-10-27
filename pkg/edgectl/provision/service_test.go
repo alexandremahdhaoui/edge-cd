@@ -21,8 +21,8 @@ func TestSetupEdgeCDService(t *testing.T) {
 	emptyCtx := execcontext.New(make(map[string]string), []string{})
 	sudoCtx := execcontext.New(make(map[string]string), []string{"sudo", "-E"})
 
-	systemdServicePath := filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/edge-cd.systemd")
-	procdServicePath := filepath.Join(repoPath, "cmd/edge-cd/service-managers/procd/edge-cd.procd")
+	systemdServicePath := filepath.Join(repoPath, "cmd/edge-cd/service-managers/systemd/service")
+	procdServicePath := filepath.Join(repoPath, "cmd/edge-cd/service-managers/procd/service")
 
 	tests := []struct {
 		name             string
@@ -70,7 +70,7 @@ func TestSetupEdgeCDService(t *testing.T) {
 			envs := make(map[string]string)
 			ctx := execcontext.New(envs, tt.prependCmd)
 
-			err := SetupEdgeCDService(ctx, mockRunner, tt.serviceManager, repoPath)
+			err := SetupEdgeCDService(ctx, mockRunner, tt.serviceManager, repoPath, repoPath)
 			if err != nil {
 				t.Fatalf("SetupEdgeCDService failed: %v", err)
 			}

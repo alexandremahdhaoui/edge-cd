@@ -33,26 +33,28 @@ type ServiceManagerConfig struct {
 
 // SetupEdgeCDService sets up and enables the edge-cd service on the remote device.
 // The context parameter should contain any required prepend commands (e.g., "sudo").
+// localEdgeCDRepoPath is used to read config files locally.
+// remoteEdgeCDRepoPath is the path to the edge-cd repo on the remote target VM.
 func SetupEdgeCDService(
 	execCtx execcontext.Context,
 	runner ssh.Runner,
-	svcmgrName, edgeCDRepoPath string,
+	svcmgrName, localEdgeCDRepoPath, remoteEdgeCDRepoPath string,
 ) error {
 	var stdout, stderr string
-	// Load the service manager configuration
-	config, err := loadServiceManagerConfig(edgeCDRepoPath, svcmgrName)
+	// Load the service manager configuration from LOCAL repo
+	config, err := loadServiceManagerConfig(localEdgeCDRepoPath, svcmgrName)
 	if err != nil {
 		return err
 	}
 
-	// Determine source and destination paths for the service file
+	// Determine source and destination paths for the service file on REMOTE
 	serviceSourcePath := filepath.Join(
-		edgeCDRepoPath,
+		remoteEdgeCDRepoPath,
 		"cmd",
 		"edge-cd",
 		"service-managers",
 		svcmgrName,
-		fmt.Sprintf("edge-cd.%s", svcmgrName),
+		"service",
 	)
 	serviceDestPath := config.EdgeCDService.DestinationPath
 
