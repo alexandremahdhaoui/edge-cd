@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,8 +16,35 @@ import (
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/cloudinit"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
 	"libvirt.org/go/libvirt"
 	"libvirt.org/go/libvirtxml"
+)
+
+var (
+	errConnectLibvirt          = errors.New("failed to connect to libvirt")
+	errGenerateCloudInitISO    = errors.New("failed to generate cloud-init ISO")
+	errCreateVMDisk            = errors.New("failed to create VM disk")
+	errMarshalDomainXML        = errors.New("failed to marshal domain XML")
+	errDefineDomain            = errors.New("failed to define domain")
+	errCreateDomain            = errors.New("failed to create domain")
+	errGetDomainXML            = errors.New("failed to get domain XML")
+	errGetDomainIP             = errors.New("failed to get domain IP")
+	errLibvirtNotInitialized   = errors.New("libvirt connection is not initialized")
+	errVMNotFound              = errors.New("VM not found")
+	errVMNotRunning            = errors.New("VM not running")
+	errTimeoutWaitingIP        = errors.New("timed out waiting for VM IP address")
+	errGetDomainState          = errors.New("failed to get domain state")
+	errDestroyDomain           = errors.New("failed to destroy domain")
+	errUndefineDomain          = errors.New("failed to undefine domain")
+	errDeleteVMDisk            = errors.New("failed to delete VM disk")
+	errCreateCloudInitDir      = errors.New("failed to create cloud-init config directory")
+	errWriteUserData           = errors.New("failed to write user-data file")
+	errWriteMetaData           = errors.New("failed to write meta-data file")
+	errCreateCloudInitISO      = errors.New("failed to create cloud-init ISO with xorriso")
+	errGetDomainName           = errors.New("failed to get domain name")
+	errCreateStream            = errors.New("failed to create new stream")
+	errOpenConsole             = errors.New("failed to open console")
 )
 
 const (
@@ -54,7 +82,7 @@ func WithBaseDir(baseDir string) VMMOption {
 func NewVMM(opts ...VMMOption) (*VMM, error) {
 	conn, err := libvirt.NewConnect("qemu:///system")
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to libvirt: %w", err)
+		return nil, flaterrors.Join(err, errConnectLibvirt)
 	}
 	vmm := &VMM{
 		conn:    conn,
@@ -131,7 +159,7 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 
 	cloudInitISOPath, err := generateCloudInitISO(cfg.Name, userData, tempDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate cloud-init ISO: %w", err)
+		return nil, flaterrors.Join(err, errGenerateCloudInitISO)
 	}
 	defer os.Remove(cloudInitISOPath)
 
@@ -148,7 +176,7 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 		cfg.DiskSize,
 	)
 	if output, err := qemuImgCmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("failed to create VM disk: %w\nOutput: %s", err, output)
+		return nil, flaterrors.Join(err, fmt.Errorf("output: %s", output), errCreateVMDisk)
 	}
 
 	var filesystems []libvirtxml.DomainFilesystem
@@ -311,17 +339,17 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 
 	vmXML, err := domain.Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal domain XML: %w", err)
+		return nil, flaterrors.Join(err, errMarshalDomainXML)
 	}
 
 	dom, err := v.conn.DomainDefineXML(vmXML)
 	if err != nil {
-		return nil, fmt.Errorf("failed to define domain: %w", err)
+		return nil, flaterrors.Join(err, errDefineDomain)
 	}
 
 	if err := dom.Create(); err != nil {
 		dom.Free()
-		return nil, fmt.Errorf("failed to create domain: %w", err)
+		return nil, flaterrors.Join(err, errCreateDomain)
 	}
 
 	v.domains[cfg.Name] = dom
@@ -330,7 +358,7 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 	domXML, err := dom.GetXMLDesc(0)
 	if err != nil {
 		// Log error but don't fail - this is for debugging purposes
-		fmt.Printf("Warning: failed to get domain XML for %s: %v\n", cfg.Name, err)
+		slog.Debug("failed to get domain XML", "vmName", cfg.Name, "error", err.Error())
 		domXML = ""
 	}
 
@@ -339,7 +367,7 @@ func (v *VMM) CreateVM(cfg VMConfig) (*VMMetadata, error) {
 	ipAddress, err := v.GetDomainIP(execCtx, cfg.Name, 60*time.Second)
 	if err != nil {
 		// Log but don't fail - IP might not be available immediately
-		fmt.Printf("Warning: failed to get IP for VM %s: %v\n", cfg.Name, err)
+		slog.Debug("failed to get IP for VM", "vmName", cfg.Name, "error", err.Error())
 		ipAddress = ""
 	}
 
@@ -398,7 +426,7 @@ func (v *VMM) DomainExists(ctx execcontext.Context, name string) (bool, error) {
 	// Domain not in memory, query libvirt directly
 	// This is critical for cleanup scenarios where a new VMM instance is created
 	if v.conn == nil {
-		return false, fmt.Errorf("libvirt connection is not initialized")
+		return false, errLibvirtNotInitialized
 	}
 
 	domain, err := v.conn.LookupDomainByName(name)
@@ -425,7 +453,7 @@ func (v *VMM) GetDomainIP(
 ) (string, error) {
 	dom, ok := v.domains[name]
 	if !ok || dom == nil {
-		return "", fmt.Errorf("VM %s not found or not running", name)
+		return "", flaterrors.Join(fmt.Errorf("vmName=%s", name), errVMNotFound)
 	}
 
 	// Retry with exponential backoff up to timeout
@@ -435,7 +463,7 @@ func (v *VMM) GetDomainIP(
 
 	for {
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("timed out waiting for VM %s IP address", name)
+			return "", flaterrors.Join(fmt.Errorf("vmName=%s", name), errTimeoutWaitingIP)
 		}
 
 		// Try to get IP address
@@ -469,12 +497,12 @@ func (v *VMM) GetDomainIP(
 func (v *VMM) GetDomainXML(ctx execcontext.Context, name string) (string, error) {
 	dom, ok := v.domains[name]
 	if !ok || dom == nil {
-		return "", fmt.Errorf("VM %s not found", name)
+		return "", flaterrors.Join(fmt.Errorf("vmName=%s", name), errVMNotFound)
 	}
 
 	xml, err := dom.GetXMLDesc(0)
 	if err != nil {
-		return "", fmt.Errorf("failed to get domain XML for %s: %w", name, err)
+		return "", flaterrors.Join(err, fmt.Errorf("vmName=%s", name), errGetDomainXML)
 	}
 
 	return xml, nil
@@ -491,7 +519,7 @@ func (v *VMM) GetDomainByName(ctx execcontext.Context, name string) (*libvirt.Do
 
 	// Domain not in memory, query libvirt directly
 	if v.conn == nil {
-		return nil, fmt.Errorf("libvirt connection is not initialized")
+		return nil, errLibvirtNotInitialized
 	}
 
 	domain, err := v.conn.LookupDomainByName(name)
@@ -521,7 +549,7 @@ func (v *VMM) DestroyVM(ctx execcontext.Context, vmName string) error {
 
 	// If domain doesn't exist, treat as success (idempotent cleanup)
 	if dom == nil {
-		fmt.Printf("VM %s not found in libvirt, skipping destroy\n", vmName)
+		slog.Info("VM not found in libvirt, skipping destroy", "vmName", vmName)
 		// Still try to delete disk files if they exist
 		tempDir := v.baseDir
 		if tempDir == "" {
@@ -536,19 +564,19 @@ func (v *VMM) DestroyVM(ctx execcontext.Context, vmName string) error {
 
 	state, _, err := dom.GetState()
 	if err != nil {
-		return fmt.Errorf("failed to get domain state for %s: %w", vmName, err)
+		return flaterrors.Join(err, fmt.Errorf("vmName=%s", vmName), errGetDomainState)
 	}
 
 	// Stop the VM if it's running
 	if state == libvirt.DOMAIN_RUNNING {
 		if err := dom.Destroy(); err != nil {
-			return fmt.Errorf("failed to destroy domain %s: %w", vmName, err)
+			return flaterrors.Join(err, fmt.Errorf("vmName=%s", vmName), errDestroyDomain)
 		}
 	}
 
 	// Undefine the domain from libvirt
 	if err := dom.Undefine(); err != nil {
-		return fmt.Errorf("failed to undefine domain %s: %w", vmName, err)
+		return flaterrors.Join(err, fmt.Errorf("vmName=%s", vmName), errUndefineDomain)
 	}
 
 	// Determine temp directory: v.baseDir > os.TempDir()
@@ -560,14 +588,14 @@ func (v *VMM) DestroyVM(ctx execcontext.Context, vmName string) error {
 	// Delete the VM's disk file
 	vmDiskPath := filepath.Join(tempDir, fmt.Sprintf("%s.qcow2", vmName))
 	if err := os.Remove(vmDiskPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to delete VM disk %s: %w", vmDiskPath, err)
+		return flaterrors.Join(err, fmt.Errorf("vmDiskPath=%s", vmDiskPath), errDeleteVMDisk)
 	}
 
 	// Delete the cloud-init ISO if it exists
 	cloudInitISOPath := filepath.Join(tempDir, fmt.Sprintf("%s-cloud-init.iso", vmName))
 	if err := os.Remove(cloudInitISOPath); err != nil && !os.IsNotExist(err) {
 		// Log but don't fail - this is just cleanup
-		fmt.Printf("Warning: failed to delete cloud-init ISO %s: %v\n", cloudInitISOPath, err)
+		slog.Debug("failed to delete cloud-init ISO", "path", cloudInitISOPath, "error", err.Error())
 	}
 
 	dom.Free()
@@ -583,18 +611,18 @@ func generateCloudInitISO(vmName, userData, tempDir string) (string, error) {
 	// Create a temporary directory for cloud-init config files
 	cloudInitDir := filepath.Join(tempDir, fmt.Sprintf("%s-cloud-init-config", vmName))
 	if err := os.MkdirAll(cloudInitDir, 0o755); err != nil {
-		return "", fmt.Errorf("failed to create cloud-init config directory: %w", err)
+		return "", flaterrors.Join(err, errCreateCloudInitDir)
 	}
 	defer os.RemoveAll(cloudInitDir)
 
 	userFile := filepath.Join(cloudInitDir, "user-data")
 	if err := os.WriteFile(userFile, []byte(userData), 0o644); err != nil {
-		return "", fmt.Errorf("failed to write user-data file: %w", err)
+		return "", flaterrors.Join(err, errWriteUserData)
 	}
 
 	metaFile := filepath.Join(cloudInitDir, "meta-data")
 	if err := os.WriteFile(metaFile, []byte(metaData), 0o644); err != nil {
-		return "", fmt.Errorf("failed to write meta-data file: %w", err)
+		return "", flaterrors.Join(err, errWriteMetaData)
 	}
 
 	xorrisoCmd := exec.Command(
@@ -606,11 +634,7 @@ func generateCloudInitISO(vmName, userData, tempDir string) (string, error) {
 		cloudInitDir,
 	)
 	if output, err := xorrisoCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf(
-			"failed to create cloud-init ISO with xorriso: %w\nOutput: %s",
-			err,
-			output,
-		)
+		return "", flaterrors.Join(err, fmt.Errorf("output: %s", output), errCreateCloudInitISO)
 	}
 	return isoPath, nil
 }
@@ -619,7 +643,7 @@ func generateCloudInitISO(vmName, userData, tempDir string) (string, error) {
 func (v *VMM) GetVMIPAddress(vmName string) (string, error) {
 	dom, ok := v.domains[vmName]
 	if !ok || dom == nil {
-		return "", fmt.Errorf("VM %s not found or not running", vmName)
+		return "", flaterrors.Join(fmt.Errorf("vmName=%s", vmName), errVMNotFound)
 	}
 
 	// Retry for up to 60 seconds to get the VM's IP address
@@ -630,13 +654,13 @@ func (v *VMM) GetVMIPAddress(vmName string) (string, error) {
 	for {
 		select {
 		case <-timeout:
-			return "", fmt.Errorf("timed out waiting for VM %s IP address", vmName)
+			return "", flaterrors.Join(fmt.Errorf("vmName=%s", vmName), errTimeoutWaitingIP)
 		case <-tick.C:
 			ifaces, err := dom.ListAllInterfaceAddresses(
 				libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE,
 			)
 			if err != nil {
-				fmt.Printf("Error listing interface addresses for %s: %v\n", vmName, err)
+				slog.Debug("error listing interface addresses", "vmName", vmName, "error", err.Error())
 				continue
 			}
 
@@ -647,10 +671,7 @@ func (v *VMM) GetVMIPAddress(vmName string) (string, error) {
 					}
 				}
 			}
-			fmt.Printf(
-				"VM %s IP address not found in libvirt interface addresses, retrying...\n",
-				vmName,
-			)
+			slog.Debug("VM IP address not found, retrying...", "vmName", vmName)
 		}
 	}
 }
@@ -659,23 +680,23 @@ func (v *VMM) GetVMIPAddress(vmName string) (string, error) {
 func (v *VMM) GetConsoleOutput(vmName string) (string, error) {
 	dom, ok := v.domains[vmName]
 	if !ok || dom == nil {
-		return "", fmt.Errorf("VM %s not found or not running", vmName)
+		return "", flaterrors.Join(fmt.Errorf("vmName=%s", vmName), errVMNotFound)
 	}
 
 	domainName, err := dom.GetName()
 	if err != nil {
-		return "", fmt.Errorf("failed to get domain name for %s: %w", vmName, err)
+		return "", flaterrors.Join(err, fmt.Errorf("vmName=%s", vmName), errGetDomainName)
 	}
 
 	stream, err := v.conn.NewStream(0)
 	if err != nil {
-		return "", fmt.Errorf("failed to create new stream for %s: %w", vmName, err)
+		return "", flaterrors.Join(err, fmt.Errorf("vmName=%s", vmName), errCreateStream)
 	}
 	defer stream.Free()
 
 	err = dom.OpenConsole("", stream, 0)
 	if err != nil {
-		return "", fmt.Errorf("failed to open console for domain %s: %w", domainName, err)
+		return "", flaterrors.Join(err, fmt.Errorf("domainName=%s", domainName), errOpenConsole)
 	}
 
 	var consoleOutput bytes.Buffer
@@ -697,7 +718,7 @@ func (v *VMM) GetConsoleOutput(vmName string) (string, error) {
 						close(readDone)
 						return
 					}
-					fmt.Printf("Error reading from console stream for %s: %v\n", vmName, err)
+					slog.Debug("error reading from console stream", "vmName", vmName, "error", err.Error())
 					close(readDone)
 					return
 				}

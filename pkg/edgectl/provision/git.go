@@ -1,10 +1,19 @@
 package provision
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
+)
+
+var (
+	errCloneRepo       = errors.New("failed to clone repository")
+	errPullRepo        = errors.New("failed to pull repository")
+	errCloneOrPullRepo = errors.New("failed to clone or pull repository")
 )
 
 type GitRepo struct {
@@ -29,39 +38,32 @@ func CloneOrPullRepo(
 	_, _, err := runner.Run(execCtx, "test", "-d", destPath)
 	if err != nil { // Directory does not exist, so clone
 		// Clone the repository
-		op = "clon"
-		fmt.Printf("%sing repository %s (branch: %s) to %s...\n", op, repo.URL, repo.Branch, destPath)
+				slog.Info("cloning repository", "url", repo.URL, "branch", repo.Branch, "destPath", destPath)
 		stdout, stderr, cloneErr := runner.Run(execCtx, "git", "clone", "-b", repo.Branch, repo.URL, destPath)
 		if cloneErr != nil {
-			return fmt.Errorf(
-				"failed to %se repository %s (branch: %s): %w. Stdout: %s, Stderr: %s",
-				op,
-				repo.URL,
-				repo.Branch,
+			return flaterrors.Join(
 				cloneErr,
-				stdout,
-				stderr,
+				fmt.Errorf("url=%s branch=%s stdout=%s stderr=%s", repo.URL, repo.Branch, stdout, stderr),
+				errCloneRepo,
+				errCloneOrPullRepo,
 			)
 		}
 	} else {
 		// Directory exists, so pull
 		op = "pull"
-		fmt.Printf("%sing repository %s (branch: %s) to %s...\n", op, repo.URL, repo.Branch, destPath)
+				slog.Info("pulling repository", "url", repo.URL, "branch", repo.Branch, "destPath", destPath)
 		stdout, stderr, pullErr := runner.Run(execCtx, "git", "-C", destPath, "pull")
 		if pullErr != nil {
-			return fmt.Errorf(
-				"failed to %se repository %s (branch: %s): %w. Stdout: %s, Stderr: %s",
-				op,
-				repo.URL,
-				repo.Branch,
+			return flaterrors.Join(
 				pullErr,
-				stdout,
-				stderr,
+				fmt.Errorf("url=%s branch=%s stdout=%s stderr=%s", repo.URL, repo.Branch, stdout, stderr),
+				errPullRepo,
+				errCloneOrPullRepo,
 			)
 		}
 	}
 
-	fmt.Printf("Successfully %sed repository %s (branch: %s).\n", op, repo.URL, repo.Branch)
+	slog.Info("successfully cloned/pulled repository", "url", repo.URL, "branch", repo.Branch, "operation", op)
 
 	return nil
 }

@@ -1,19 +1,25 @@
 package lock
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
 )
 
 const (
 	lockFilePath = "/tmp/edgectl.lock"
 )
 
-// ErrLockHeld is returned when an attempt is made to acquire a lock that is already held.
-var ErrLockHeld = fmt.Errorf("lock already held at %s", lockFilePath)
+var (
+	// ErrLockHeld is returned when an attempt is made to acquire a lock that is already held.
+	ErrLockHeld      = fmt.Errorf("lock already held at %s", lockFilePath)
+	errAcquireLock   = errors.New("failed to acquire lock")
+	errReleaseLock   = errors.New("failed to release lock")
+)
 
 // Acquire attempts to acquire a remote file-based lock.
 // It returns ErrLockHeld if the lock is already held.
@@ -23,7 +29,7 @@ func Acquire(execCtx execcontext.Context, runner ssh.Runner) error {
 		if strings.Contains(stderr, "File exists") || strings.Contains(stderr, "cannot create directory") {
 			return ErrLockHeld
 		}
-		return fmt.Errorf("failed to acquire lock: %w", err)
+		return flaterrors.Join(err, errAcquireLock)
 	}
 	return nil
 }
@@ -37,7 +43,7 @@ func Release(execCtx execcontext.Context, runner ssh.Runner) error {
 		if strings.Contains(stderr, "No such file or directory") || strings.Contains(stderr, "not a directory") {
 			return nil
 		}
-		return fmt.Errorf("failed to release lock: %w", err)
+		return flaterrors.Join(err, errReleaseLock)
 	}
 	return nil
 }

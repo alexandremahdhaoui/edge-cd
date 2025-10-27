@@ -2,13 +2,22 @@ package provision
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"text/template"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
+)
+
+var (
+	errParseConfigTemplate  = errors.New("failed to parse config template")
+	errRenderConfigTemplate = errors.New("failed to render config template")
+	errPlaceConfigYAML      = errors.New("failed to place config.yaml")
+	errReadLocalConfig      = errors.New("failed to read local config file")
 )
 
 const configTemplate = `
@@ -66,13 +75,13 @@ type ConfigTemplateData struct {
 func RenderConfig(data ConfigTemplateData) (string, error) {
 	tmpl, err := template.New("config").Parse(configTemplate)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse config template: %w", err)
+		return "", flaterrors.Join(err, errParseConfigTemplate)
 	}
 
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, data)
 	if err != nil {
-		return "", fmt.Errorf("failed to render config template: %w", err)
+		return "", flaterrors.Join(err, errRenderConfigTemplate)
 	}
 
 	return buf.String(), nil
@@ -88,13 +97,7 @@ func PlaceConfigYAML(
 	cmd := []string{"printf", "%s", content, ">", destPath}
 	stdout, stderr, err := runner.Run(execCtx, cmd...)
 	if err != nil {
-		return fmt.Errorf(
-			"failed to place config.yaml at %s: %w. Stdout: %s, Stderr: %s",
-			destPath,
-			err,
-			stdout,
-			stderr,
-		)
+		return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", destPath, stdout, stderr), errPlaceConfigYAML)
 	}
 	return nil
 }
@@ -102,9 +105,9 @@ func PlaceConfigYAML(
 // ReadLocalConfig reads a configuration file from the local filesystem.
 func ReadLocalConfig(configPath, configSpec string) (string, error) {
 	fullPath := filepath.Join(configPath, configSpec)
-	content, err := ioutil.ReadFile(fullPath)
+	content, err := os.ReadFile(fullPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read local config file %s: %w", fullPath, err)
+		return "", flaterrors.Join(err, fmt.Errorf("fullPath=%s", fullPath), errReadLocalConfig)
 	}
 	return string(content), nil
 }

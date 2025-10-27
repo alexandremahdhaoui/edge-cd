@@ -1,9 +1,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,6 +12,19 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/edgectl/provision"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
+)
+
+var (
+	errCreateSSHClient     = errors.New("failed to create SSH client")
+	errCreateTempDir       = errors.New("failed to create temporary directory")
+	errCloneLocalRepo      = errors.New("failed to clone edge-cd repository locally")
+	errProvisionPackages   = errors.New("failed to provision packages")
+	errCloneUserConfigRepo = errors.New("failed to clone user config repo")
+	errReadLocalConfig     = errors.New("failed to read local config")
+	errRenderConfig        = errors.New("failed to render config template")
+	errPlaceConfig         = errors.New("failed to place config.yaml")
+	errSetupService        = errors.New("failed to setup edge-cd service")
 )
 
 func main() {
@@ -139,7 +153,8 @@ func main() {
 		// SSH Client
 		sshClient, err := ssh.NewClient(*targetAddr, *targetUser, *sshPrivateKey, "22")
 		if err != nil {
-			log.Fatalf("Failed to create SSH client: %v", err)
+			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errCreateSSHClient).Error())
+			os.Exit(1)
 		}
 
 		// Define remote paths (from flags or defaults)
@@ -165,7 +180,8 @@ func main() {
 		// Clone edge-cd repo locally to get package manager configs
 		localEdgeCDRepoTempDir, err := os.MkdirTemp("", "edgectl-local-edge-cd-repo-")
 		if err != nil {
-			log.Fatalf("Failed to create temporary directory for local edge-cd repo: %v", err)
+			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errCreateTempDir).Error())
+			os.Exit(1)
 		}
 		defer os.RemoveAll(localEdgeCDRepoTempDir) // Clean up temp directory
 
@@ -180,14 +196,16 @@ func main() {
 		localCloneCmd.Stdout = os.Stderr
 		localCloneCmd.Stderr = os.Stderr
 		if err := localCloneCmd.Run(); err != nil {
-			log.Fatalf("Failed to clone edge-cd repository locally: %v", err)
+			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errCloneLocalRepo).Error())
+			os.Exit(1)
 		}
 
 		// Package Provisioning
 		pkgs := strings.Split(*packages, ",")
 		if len(pkgs) > 0 {
 			if err := provision.ProvisionPackages(targetExecCtx, sshClient, pkgs, *packageManager, localEdgeCDRepoTempDir, *edgeCDRepo, remoteEdgeCDRepoDestPath); err != nil {
-				log.Fatalf("Failed to provision packages: %v", err)
+				slog.Error("bootstrap failed", "error", flaterrors.Join(err, errProvisionPackages).Error())
+				os.Exit(1)
 			}
 		}
 
@@ -196,7 +214,8 @@ func main() {
 			Branch: *configBranch,
 		}
 		if err := provision.CloneOrPullRepo(targetExecCtx, sshClient, userConfigRepoPath, configGitRepo); err != nil {
-			log.Fatalf("Failed to clone user config repo: %v", err)
+			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errCloneUserConfigRepo).Error())
+			os.Exit(1)
 		}
 
 		// Config Placement
@@ -204,7 +223,8 @@ func main() {
 		if *configPath != "" && *configSpec != "" {
 			configContent, err = provision.ReadLocalConfig(*configPath, *configSpec)
 			if err != nil {
-				log.Fatalf("Failed to read local config: %v", err)
+				slog.Error("bootstrap failed", "error", flaterrors.Join(err, errReadLocalConfig).Error())
+				os.Exit(1)
 			}
 		} else {
 			configData := provision.ConfigTemplateData{
@@ -216,20 +236,23 @@ func main() {
 			}
 			configContent, err = provision.RenderConfig(configData)
 			if err != nil {
-				log.Fatalf("Failed to render config template: %v", err)
+				slog.Error("bootstrap failed", "error", flaterrors.Join(err, errRenderConfig).Error())
+				os.Exit(1)
 			}
 		}
 
 		if err := provision.PlaceConfigYAML(targetExecCtx, sshClient, configContent, "/etc/edge-cd/config.yaml"); err != nil {
-			log.Fatalf("Failed to place config.yaml: %v", err)
+			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errPlaceConfig).Error())
+			os.Exit(1)
 		}
 
 		// Service Setup
 		if err := provision.SetupEdgeCDService(targetExecCtx, sshClient, *serviceManager, localEdgeCDRepoTempDir); err != nil {
-			log.Fatalf("Failed to setup edge-cd service: %v", err)
+			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errSetupService).Error())
+			os.Exit(1)
 		}
 
-		fmt.Println("Bootstrap completed successfully!")
+		slog.Info("bootstrap completed successfully")
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)

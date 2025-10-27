@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,6 +15,37 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/gitserver"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
+)
+
+var (
+	errArtifactDirRequired    = errors.New("ArtifactDir is required")
+	errImageCacheDirRequired   = errors.New("ImageCacheDir is required")
+	errEdgeCDRepoPathRequired  = errors.New("EdgeCDRepoPath is required")
+	errCreateArtifactDir       = errors.New("failed to create artifact directory")
+	errCreateTestEnvironment  = errors.New("failed to create test environment")
+	errCreateManagedTempDir   = errors.New("failed to create managed temp directory root")
+	errCreateTempSubdir       = errors.New("failed to create temp subdirectory")
+	errCreateArtifactSubdir   = errors.New("failed to create artifact subdirectory")
+	errDownloadVMImage         = errors.New("failed to download VM image")
+	errVMImageNotFound         = errors.New("VM image not found and DownloadImages is false")
+	errGenerateHostSSHKey     = errors.New("failed to generate host SSH key")
+	errSetupTargetVM          = errors.New("failed to setup target VM")
+	errSetupGitServer         = errors.New("failed to setup git server")
+	errUpdateTestEnvironment   = errors.New("failed to update test environment")
+	errReadHostPubKey         = errors.New("failed to read host public key")
+	errCreateVMM               = errors.New("failed to create VMM")
+	errCreateTargetVM          = errors.New("failed to create target VM")
+	errTargetVMNoIP            = errors.New("target VM created but no IP address available")
+	errCreateSSHClient          = errors.New("failed to create SSH client")
+	errTargetVMSSHNotReady     = errors.New("target VM SSH server did not become ready")
+	errFetchTargetVMPubKey    = errors.New("failed to fetch target VM public key")
+	errRunGitServer           = errors.New("failed to run git server")
+	errGitServerStatusNil     = errors.New("git server status is nil after successful Run()")
+	errSSHKeyGen               = errors.New("ssh-keygen failed")
+	errSetSSHKeyPerms         = errors.New("failed to set SSH key permissions")
+	errCreateImageCacheDir    = errors.New("failed to create image cache directory")
+	errDownloadImage          = errors.New("failed to download VM image")
 )
 
 // SetupConfig contains configuration for test environment setup
@@ -42,32 +74,32 @@ func SetupTestEnvironment(
 ) (*TestEnvironment, error) {
 	// Validate config
 	if config.ArtifactDir == "" {
-		return nil, fmt.Errorf("ArtifactDir is required")
+		return nil, errArtifactDirRequired
 	}
 	if config.ImageCacheDir == "" {
-		return nil, fmt.Errorf("ImageCacheDir is required")
+		return nil, errImageCacheDirRequired
 	}
 	if config.EdgeCDRepoPath == "" {
-		return nil, fmt.Errorf("EdgeCDRepoPath is required")
+		return nil, errEdgeCDRepoPathRequired
 	}
 
 	// Create artifact directory
 	if err := os.MkdirAll(config.ArtifactDir, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to create artifact directory: %w", err)
+		return nil, flaterrors.Join(err, errCreateArtifactDir)
 	}
 
 	// Create in-memory test environment
 	manager := NewManager(config.ArtifactDir)
 	testEnv, err := manager.CreateEnvironment(execCtx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create test environment: %w", err)
+		return nil, flaterrors.Join(err, errCreateTestEnvironment)
 	}
 
 	// Create the root temp directory with marker file: /tmp/e2e-<test-id>
 	// The marker file ensures we only delete managed temp directories
 	tempDirRoot := filepath.Join(os.TempDir(), testEnv.ID)
 	if _, err := CreateTempDirectory(tempDirRoot); err != nil {
-		return nil, fmt.Errorf("failed to create managed temp directory root: %w", err)
+		return nil, flaterrors.Join(err, errCreateManagedTempDir)
 	}
 	testEnv.TempDirRoot = tempDirRoot
 
@@ -77,15 +109,14 @@ func SetupTestEnvironment(
 	artifactsTempDir := filepath.Join(tempDirRoot, "artifacts")
 
 	for _, dir := range []string{vmmTempDir, gitServerTempDir, artifactsTempDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("failed to create temp subdirectory %s: %w", dir, err)
-		}
-	}
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, flaterrors.Join(err, fmt.Errorf("dir=%s", dir), errCreateTempSubdir)
+			}	}
 
 	// Create artifact subdirectory for this specific test (using the new structure)
 	artifactDir := filepath.Join(config.ArtifactDir, "artifacts", testEnv.ID)
 	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to create artifact subdirectory: %w", err)
+		return nil, flaterrors.Join(err, errCreateArtifactSubdir)
 	}
 	testEnv.ArtifactPath = artifactDir
 
@@ -97,10 +128,10 @@ func SetupTestEnvironment(
 	if _, err := os.Stat(imageCachePath); os.IsNotExist(err) {
 		if config.DownloadImages {
 			if err := downloadVMImage(imageURL, imageCachePath); err != nil {
-				return nil, fmt.Errorf("failed to download VM image: %w", err)
+				return nil, flaterrors.Join(err, errDownloadVMImage)
 			}
 		} else {
-			return nil, fmt.Errorf("VM image not found and DownloadImages is false: %s", imageCachePath)
+			return nil, flaterrors.Join(fmt.Errorf("imageCachePath=%s", imageCachePath), errVMImageNotFound)
 		}
 	}
 
@@ -108,7 +139,7 @@ func SetupTestEnvironment(
 	hostKeyPath := filepath.Join(artifactDir, "id_rsa_host")
 
 	if err := generateSSHKeyPair(hostKeyPath); err != nil {
-		return nil, fmt.Errorf("failed to generate host SSH key: %w", err)
+		return nil, flaterrors.Join(err, errGenerateHostSSHKey)
 	}
 	testEnv.SSHKeys.HostKeyPath = hostKeyPath
 	testEnv.SSHKeys.HostKeyPubPath = hostKeyPath + ".pub"
@@ -116,7 +147,7 @@ func SetupTestEnvironment(
 	// Create target VM (pass VMM temp directory)
 	targetVM, err := setupTargetVM(execCtx, testEnv, imageCachePath, vmmTempDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to setup target VM: %w", err)
+		return nil, flaterrors.Join(err, errSetupTargetVM)
 	}
 	testEnv.TargetVM = *targetVM
 	// Track created files from target VM
@@ -131,7 +162,7 @@ func SetupTestEnvironment(
 		gitServerTempDir,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to setup git server: %w", err)
+		return nil, flaterrors.Join(err, errSetupGitServer)
 	}
 	testEnv.GitServerVM = *gitServerVM.VMMetadata
 	testEnv.GitSSHURLs = gitServerVM.GitSSHURLs
@@ -147,7 +178,7 @@ func SetupTestEnvironment(
 	// Update status
 	testEnv.Status = "created"
 	if err := manager.UpdateEnvironment(execCtx, testEnv); err != nil {
-		return nil, fmt.Errorf("failed to update test environment: %w", err)
+		return nil, flaterrors.Join(err, errUpdateTestEnvironment)
 	}
 
 	return testEnv, nil
@@ -163,7 +194,7 @@ func setupTargetVM(
 	// Read SSH public keys
 	hostPubKey, err := os.ReadFile(env.SSHKeys.HostKeyPubPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read host public key: %w", err)
+		return nil, flaterrors.Join(err, errReadHostPubKey)
 	}
 
 	// Create ubuntu user with host's public key in authorized_keys
@@ -197,17 +228,17 @@ func setupTargetVM(
 	// Create VMM with base directory option and provision VM
 	vmManager, err := vmm.NewVMM(vmm.WithBaseDir(vmmTempDir))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create VMM: %w", err)
+		return nil, flaterrors.Join(err, errCreateVMM)
 	}
 	defer vmManager.Close()
 
 	metadata, err := vmManager.CreateVM(vmConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create target VM: %w", err)
+		return nil, flaterrors.Join(err, errCreateTargetVM)
 	}
 
 	if metadata.IP == "" {
-		return nil, fmt.Errorf("target VM created but no IP address available")
+		return nil, errTargetVMNoIP
 	}
 
 	// Wait for SSH to become available
@@ -218,11 +249,11 @@ func setupTargetVM(
 		"22",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create SSH client: %w", err)
+		return nil, flaterrors.Join(err, errCreateSSHClient)
 	}
 
 	if err := sshClient.AwaitServer(60 * time.Second); err != nil {
-		return nil, fmt.Errorf("target VM SSH server did not become ready: %w", err)
+		return nil, flaterrors.Join(err, errTargetVMSSHNotReady)
 	}
 
 	return metadata, nil
@@ -243,13 +274,13 @@ func FetchTargetVMPublicKey(
 		"22",
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to create SSH client: %w", err)
+		return "", flaterrors.Join(err, errCreateSSHClient)
 	}
 
 	// Fetch the default public key that cloud-init created
 	publicKey, stderr, err := sshClient.Run(execCtx, "cat", "${HOME}/.ssh/id_ed25519.pub")
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch target VM public key: %w\nstderr: %s", err, stderr)
+		return "", flaterrors.Join(err, fmt.Errorf("stderr=%s", stderr), errFetchTargetVMPubKey)
 	}
 
 	slog.Info("successfully fetched public key", "publicKey", publicKey, "fromIp", metadata.IP)
@@ -290,13 +321,13 @@ func setupGitServer(
 	// Get public key from host
 	hostPubKey, err := os.ReadFile(env.SSHKeys.HostKeyPubPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read host public key: %w", err)
+		return nil, flaterrors.Join(err, errReadHostPubKey)
 	}
 
 	// Fetch target VM's actual public key (created by cloud-init)
 	targetPubKey, err := FetchTargetVMPublicKey(execCtx, &env.TargetVM, env.SSHKeys.HostKeyPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch target VM public key: %w", err)
+		return nil, flaterrors.Join(err, errFetchTargetVMPubKey)
 	}
 
 	server.AuthorizedKeys = []string{
@@ -306,12 +337,12 @@ func setupGitServer(
 
 	// Run git server (this creates the VM and sets up repositories)
 	if err := server.Run(execCtx); err != nil {
-		return nil, fmt.Errorf("failed to run git server: %w", err)
+		return nil, flaterrors.Join(err, errRunGitServer)
 	}
 
 	status := server.Status()
 	if status == nil {
-		return nil, fmt.Errorf("git server status is nil after successful Run()")
+		return nil, errGitServerStatusNil
 	}
 
 	return status, nil
@@ -328,12 +359,12 @@ func generateSSHKeyPair(keyPath string) error {
 	)
 
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ssh-keygen failed: %w\nOutput: %s", err, output)
+		return flaterrors.Join(err, fmt.Errorf("output=%s", output), errSSHKeyGen)
 	}
 
 	// Ensure proper permissions on private key
 	if err := os.Chmod(keyPath, 0o600); err != nil {
-		return fmt.Errorf("failed to set SSH key permissions: %w", err)
+		return flaterrors.Join(err, errSetSSHKeyPerms)
 	}
 
 	return nil
@@ -343,7 +374,7 @@ func generateSSHKeyPair(keyPath string) error {
 func downloadVMImage(imageURL, destPath string) error {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return fmt.Errorf("failed to create image cache directory: %w", err)
+		return flaterrors.Join(err, errCreateImageCacheDir)
 	}
 
 	cmd := exec.Command(
@@ -361,7 +392,7 @@ func downloadVMImage(imageURL, destPath string) error {
 	if err := cmd.Run(); err != nil {
 		// Clean up partial file
 		os.Remove(destPath)
-		return fmt.Errorf("failed to download VM image: %w", err)
+		return flaterrors.Join(err, errDownloadImage)
 	}
 
 	return nil

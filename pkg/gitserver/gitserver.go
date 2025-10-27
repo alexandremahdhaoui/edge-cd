@@ -15,6 +15,34 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/vmm"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
+)
+
+var (
+	errInitDirectories         = errors.New("failed to initialize directories")
+	errInitVM                  = errors.New("failed to initialize VM")
+	errCreateVMM               = errors.New("failed to create VMM")
+	errCreateVM                = errors.New("failed to create VM")
+	errVMIPNotAvailable        = errors.New("VM created but IP address not available")
+	errCreateSSHClient         = errors.New("failed to create ssh client for initAndPushRepo")
+	errGitServerNotReady       = errors.New("git server did not become ready in time")
+	errUnsupportedRepoSource   = errors.New("unsupported repo source type")
+	errInitPushRepo            = errors.New("failed to init and push repo")
+	errDestroyVM               = errors.New("failed to destroy VM")
+	errCloseVMM                = errors.New("failed to close VMM connection")
+	errRemoveTempDir           = errors.New("failed to remove temp dir")
+	errGenerateSSHKey          = errors.New("failed to generate SSH key pair for Git server VM")
+	errSetSSHKeyPerms          = errors.New("failed to set permissions on Git server VM SSH private key")
+	errReadSSHPubKey           = errors.New("failed to read Git server VM SSH public key")
+	errInitBareRepo            = errors.New("failed to initialize bare repository on Git server")
+	errCreateTempRepoDir       = errors.New("failed to create temp local repo dir")
+	errCopyRepo                = errors.New("failed to copy repo")
+	errGitInit                 = errors.New("failed to git init local repo")
+	errGitConfig               = errors.New("failed to configure git")
+	errGitAdd                  = errors.New("failed to git add")
+	errGitCommit               = errors.New("failed to git commit")
+	errAddGitRemote            = errors.New("failed to add git remote")
+	errPushRepo                = errors.New("failed to push repo to server")
 )
 
 type SourceType int
@@ -80,23 +108,23 @@ func (s *Server) Run(
 ) error {
 	// Initialize base directories first
 	if err := s.init(); err != nil {
-		return fmt.Errorf("failed to initialize directories: %v", err)
+		return flaterrors.Join(err, errInitDirectories)
 	}
 
 	if err := s.initVM(); err != nil {
-		return fmt.Errorf("failed to initialize VM: %v", err)
+		return flaterrors.Join(err, errInitVM)
 	}
 
 	var err error
 	s.vmm, err = vmm.NewVMM(vmm.WithBaseDir(s.tempDir))
 	if err != nil {
-		return fmt.Errorf("failed to create VMM: %v", err)
+		return flaterrors.Join(err, errCreateVMM)
 	}
 
 	// Create VM and get metadata
 	metadata, err := s.vmm.CreateVM(s.vmConfig)
 	if err != nil {
-		return fmt.Errorf("failed to create VM: %v", err)
+		return flaterrors.Join(err, errCreateVM)
 	}
 
 	// Store metadata for Status() method
@@ -105,22 +133,22 @@ func (s *Server) Run(
 	// Use metadata from CreateVM
 	s.vmIPAddress = metadata.IP
 	if s.vmIPAddress == "" {
-		return fmt.Errorf("VM created but IP address not available")
+		return errVMIPNotAvailable
 	}
 	s.ServerAddr = s.vmIPAddress
 
 	if len(s.Repo) > 0 {
 		sshClient, err := s.sshClient()
 		if err != nil {
-			return fmt.Errorf("failed to create ssh client for initAndPushRepo: %w", err)
+			return flaterrors.Join(err, errCreateSSHClient)
 		}
 
 		for _, repo := range s.Repo {
 			if repo.Source.Type != LocalSource {
-				return fmt.Errorf("unsupported repo source type for repo %s", repo.Name)
+				return flaterrors.Join(fmt.Errorf("repoName=%s", repo.Name), errUnsupportedRepoSource)
 			}
 			if err := s.initAndPushRepo(execCtx, sshClient, repo.Name, repo.Source.LocalPath); err != nil {
-				return fmt.Errorf("failed to init and push repo %s: %w", repo.Name, err)
+				return flaterrors.Join(err, fmt.Errorf("repoName=%s", repo.Name), errInitPushRepo)
 			}
 
 			// Build GitSSHURLs as repos are created
@@ -198,20 +226,16 @@ func (s *Server) initVM() error {
 		"",
 	)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf(
-			"failed to generate SSH key pair for Git server VM: %w\nOutput: %s",
-			err,
-			output,
-		)
+		return flaterrors.Join(err, fmt.Errorf("output: %s", output), errGenerateSSHKey)
 	}
 	if err := os.Chmod(s.clientKeyPath, 0o600); err != nil {
-		return fmt.Errorf("failed to set permissions on Git server VM SSH private key: %v", err)
+		return flaterrors.Join(err, errSetSSHKeyPerms)
 	}
 
 	// 2. Configure cloud-init UserData
 	clientPublicKey, err := os.ReadFile(clientPublicKeyPath)
 	if err != nil {
-		return fmt.Errorf("failed to read Git server VM SSH public key: %w", err)
+		return flaterrors.Join(err, errReadSSHPubKey)
 	}
 
 	// Create a git user without using cloud-init's authorized_keys
@@ -255,15 +279,15 @@ func (s *Server) Teardown() error {
 	// Use empty execcontext for teardown
 	execCtx := execcontext.New(make(map[string]string), []string{})
 	if err := s.vmm.DestroyVM(execCtx, s.vmConfig.Name); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("failed to destroy VM: %w", err))
+		errs = errors.Join(errs, flaterrors.Join(err, errDestroyVM))
 	}
 
 	if err := s.vmm.Close(); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("failed to close VMM connection: %w", err))
+		errs = errors.Join(errs, flaterrors.Join(err, errCloseVMM))
 	}
 
 	if err := os.RemoveAll(s.tempDir); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("failed to remove temp dir: %w", err))
+		errs = errors.Join(errs, flaterrors.Join(err, errRemoveTempDir))
 	}
 
 	if errs != nil {
@@ -285,10 +309,10 @@ func (s *Server) sshClient() (*ssh.Client, error) {
 		fmt.Sprintf("%d", s.SSHPort),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create SSH client for Git server: %w", err)
+		return nil, flaterrors.Join(err, errCreateSSHClient)
 	}
 	if err := sshClient.AwaitServer(30 * time.Second); err != nil {
-		return nil, fmt.Errorf("Git server did not become ready in time: %w", err)
+		return nil, flaterrors.Join(err, errGitServerNotReady)
 	}
 	return sshClient, nil
 }
@@ -307,24 +331,21 @@ func (s *Server) initAndPushRepo(
 		"--bare",
 		fmt.Sprintf("/srv/git/%s.git", repoName),
 	); err != nil {
-		return fmt.Errorf(
-			"failed to initialize bare repository on Git server: stdout=%s; stderr=%s; %w",
-			stdout, stderr, err,
-		)
+		return flaterrors.Join(err, fmt.Errorf("stdout=%s; stderr=%s", stdout, stderr), errInitBareRepo)
 	}
 
 	// Push from the local source repository to the Git server
 	// Create a temporary directory for the local repo working copy
 	tempLocalRepoDir, err := os.MkdirTemp("", fmt.Sprintf("gitpush-%s-", repoName))
 	if err != nil {
-		return fmt.Errorf("failed to create temp local repo dir: %w", err)
+		return flaterrors.Join(err, errCreateTempRepoDir)
 	}
 	defer os.RemoveAll(tempLocalRepoDir)
 
 	// Copy the source repo to the temp directory
 	cpCmd := exec.Command("cp", "-r", srcPath, filepath.Join(tempLocalRepoDir, "repo"))
 	if output, err := cpCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to copy repo: %w\nOutput: %s", err, output)
+		return flaterrors.Join(err, fmt.Errorf("output: %s", output), errCopyRepo)
 	}
 
 	tempRepoDirPath := filepath.Join(tempLocalRepoDir, "repo")
@@ -334,7 +355,7 @@ func (s *Server) initAndPushRepo(
 		initGitCmd := exec.Command("git", "init", "-b", "main")
 		initGitCmd.Dir = tempRepoDirPath
 		if output, err := initGitCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to git init local repo: %w\nOutput: %s", err, output)
+			return flaterrors.Join(err, fmt.Errorf("output: %s", output), errGitInit)
 		}
 
 		// Configure git user
@@ -346,7 +367,7 @@ func (s *Server) initAndPushRepo(
 			cmd := exec.Command(args[0], args[1:]...)
 			cmd.Dir = tempRepoDirPath
 			if output, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("failed to configure git: %w\nOutput: %s", err, output)
+				return flaterrors.Join(err, fmt.Errorf("output: %s", output), errGitConfig)
 			}
 		}
 
@@ -354,13 +375,13 @@ func (s *Server) initAndPushRepo(
 		addCmd := exec.Command("git", "add", ".")
 		addCmd.Dir = tempRepoDirPath
 		if output, err := addCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to git add: %w\nOutput: %s", err, output)
+			return flaterrors.Join(err, fmt.Errorf("output: %s", output), errGitAdd)
 		}
 
 		commitCmd := exec.Command("git", "commit", "-m", "Initial commit")
 		commitCmd.Dir = tempRepoDirPath
 		if output, err := commitCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to git commit: %w\nOutput: %s", err, output)
+			return flaterrors.Join(err, fmt.Errorf("output: %s", output), errGitCommit)
 		}
 	}
 
@@ -376,7 +397,7 @@ func (s *Server) initAndPushRepo(
 	cmd = exec.Command("git", "remote", "add", "origin", remoteURL)
 	cmd.Dir = tempRepoDirPath
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to add git remote: %w\nOutput: %s", err, output)
+		return flaterrors.Join(err, fmt.Errorf("output: %s", output), errAddGitRemote)
 	}
 
 	// Commit any uncommitted changes
@@ -399,7 +420,7 @@ func (s *Server) initAndPushRepo(
 		),
 	)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to push repo %s to server: %w\nOutput: %s", repoName, err, output)
+		return flaterrors.Join(err, fmt.Errorf("output: %s", output), errPushRepo)
 	}
 
 	return nil

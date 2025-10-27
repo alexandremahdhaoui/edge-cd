@@ -1,13 +1,24 @@
 package provision
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
 	"sigs.k8s.io/yaml"
+)
+
+var (
+	errReadPackageManagerConfig    = errors.New("failed to read package manager config")
+	errUnmarshalPackageManagerConfig = errors.New("failed to unmarshal package manager config")
+	errCloneEdgeCDRepo             = errors.New("failed to clone edge-cd repository on remote")
+	errUpdatePackageManager        = errors.New("failed to update package manager")
+	errInstallPackages             = errors.New("failed to install packages")
 )
 
 // PackageManager holds the commands for a specific package manager.
@@ -27,17 +38,13 @@ func LoadPackageManager(pkgMgr string, rootConfigsPath string) (*PackageManager,
 	)
 	yamlFile, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read package manager config from %s: %w", configPath, err)
+		return nil, flaterrors.Join(err, fmt.Errorf("configPath=%s", configPath), errReadPackageManagerConfig)
 	}
 
 	var commands PackageManager
 	err = yaml.Unmarshal(yamlFile, &commands)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to unmarshal package manager config from %s: %w",
-			configPath,
-			err,
-		)
+		return nil, flaterrors.Join(err, fmt.Errorf("configPath=%s", configPath), errUnmarshalPackageManagerConfig)
 	}
 
 	return &PackageManager{
@@ -63,49 +70,30 @@ func ProvisionPackages(
 	}
 
 	// Clone the edge-cd repository to its destination path on the remote device
-	fmt.Printf(
-		"Cloning edge-cd repository %s to %s on remote...\n",
-		remoteEdgeCDRepoURL,
-		remoteEdgeCDRepoDestPath,
-	)
+	slog.Info("cloning edge-cd repository to remote", "url", remoteEdgeCDRepoURL, "destPath", remoteEdgeCDRepoDestPath)
 
 	// Execute with the provided context
-	if stdout, stderr, cloneErr := runner.Run(execCtx, "git", "clone", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath); cloneErr != nil {
-		return fmt.Errorf(
-			"failed to clone edge-cd repository %s on remote: %w. Stdout: %s, Stderr: %s",
-			remoteEdgeCDRepoURL,
-			cloneErr,
-			stdout,
-			stderr,
-		)
+	stdout, stderr, cloneErr := runner.Run(execCtx, "git", "clone", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath)
+	if cloneErr != nil {
+		return flaterrors.Join(cloneErr, fmt.Errorf("url=%s stdout=%s stderr=%s", remoteEdgeCDRepoURL, stdout, stderr), errCloneEdgeCDRepo)
 	}
 
 	// Update package manager repos once
 	if len(pm.Update) > 0 {
-		fmt.Printf("Updating package manager using %s...\n", pkgMgr)
+		slog.Info("updating package manager", "packageManager", pkgMgr)
 		if stdout, stderr, updateErr := runner.Run(execCtx, pm.Update...); updateErr != nil {
-			return fmt.Errorf(
-				"failed to update package manager: %w. Stdout: %s, Stderr: %s",
-				updateErr,
-				stdout,
-				stderr,
-			)
+			return flaterrors.Join(updateErr, fmt.Errorf("stdout=%s stderr=%s", stdout, stderr), errUpdatePackageManager)
 		}
 	}
 
 	// Install all packages in one command
 	if len(packages) > 0 {
-		fmt.Printf("Installing packages using %s...\n", pkgMgr)
+		slog.Info("installing packages", "packageManager", pkgMgr, "packages", packages)
 		if stdout, stderr, installErr := runner.Run(execCtx, append(pm.Install, packages...)...); installErr != nil {
-			return fmt.Errorf(
-				"failed to install packages: %w. Stdout: %s, Stderr: %s",
-				installErr,
-				stdout,
-				stderr,
-			)
+			return flaterrors.Join(installErr, fmt.Errorf("stdout=%s stderr=%s", stdout, stderr), errInstallPackages)
 		}
 	}
 
-	fmt.Printf("Successfully provisioned packages.\n")
+	slog.Info("successfully provisioned packages")
 	return nil
 }

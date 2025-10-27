@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,23 @@ import (
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
+)
+
+var (
+	errInvalidTestEnvironment      = errors.New("invalid test environment: nil or empty ID")
+	errTargetVMIPNotSet            = errors.New("target VM IP address not set")
+	errGitServerVMIPNotSet         = errors.New("git server VM IP address not set")
+	errEdgectlBinaryRequired       = errors.New("EdgectlBinaryPath is required")
+	errCreateSSHClientForExecutor  = errors.New("failed to create SSH client")
+	errEdgeCDRepoURLNotFound       = errors.New("edge-cd repository URL not found in test environment")
+	errUserConfigRepoURLNotFound   = errors.New("user-config repository URL not found in test environment")
+	errBootstrapCommand            = errors.New("bootstrap command failed")
+	errBootstrapVerification       = errors.New("bootstrap verification failed")
+	errVerificationFailed          = errors.New("verification failed")
+	errCreateTempDirForBuild       = errors.New("failed to create temporary directory")
+	errBuildEdgectl                = errors.New("failed to build edgectl binary")
+	errRemoveTempDirAfterBuild     = errors.New("error removing temp dir")
 )
 
 // ExecutorConfig contains configuration for bootstrap test execution
@@ -44,16 +62,16 @@ func ExecuteBootstrapTest(
 ) error {
 	// Validate inputs
 	if env == nil || env.ID == "" {
-		return fmt.Errorf("invalid test environment: nil or empty ID")
+		return errInvalidTestEnvironment
 	}
 	if env.TargetVM.IP == "" {
-		return fmt.Errorf("target VM IP address not set")
+		return errTargetVMIPNotSet
 	}
 	if env.GitServerVM.IP == "" {
-		return fmt.Errorf("git server VM IP address not set")
+		return errGitServerVMIPNotSet
 	}
 	if config.EdgectlBinaryPath == "" {
-		return fmt.Errorf("EdgectlBinaryPath is required")
+		return errEdgectlBinaryRequired
 	}
 
 	// Set defaults
@@ -81,7 +99,7 @@ func ExecuteBootstrapTest(
 		"22",
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create SSH client: %w", err)
+		return flaterrors.Join(err, errCreateSSHClientForExecutor)
 	}
 
 	// Get repository URLs from environment
@@ -89,10 +107,10 @@ func ExecuteBootstrapTest(
 	userConfigRepoURL := env.GitSSHURLs["user-config"]
 
 	if edgeCDRepoURL == "" {
-		return fmt.Errorf("edge-cd repository URL not found in test environment")
+		return errEdgeCDRepoURLNotFound
 	}
 	if userConfigRepoURL == "" {
-		return fmt.Errorf("user-config repository URL not found in test environment")
+		return errUserConfigRepoURLNotFound
 	}
 
 	// Define remote destination paths
@@ -135,7 +153,7 @@ func ExecuteBootstrapTest(
 
 	// Run bootstrap command
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("bootstrap command failed: %w", err)
+		return flaterrors.Join(err, errBootstrapCommand)
 	}
 
 	// Verify bootstrap results
@@ -146,7 +164,7 @@ func ExecuteBootstrapTest(
 		config.ServiceManager,
 	)
 	if len(verifyErrors) > 0 {
-		return fmt.Errorf("bootstrap verification failed: %v", verifyErrors)
+		return flaterrors.Join(fmt.Errorf("errors=%v", verifyErrors), errBootstrapVerification)
 	}
 
 	// Update environment status to passed
@@ -231,7 +249,7 @@ func verifyBootstrapResults(
 	for _, v := range verifications {
 		_, _, err := sshClient.Run(verifyCtx, v.command...)
 		if err != nil {
-			errors = append(errors, fmt.Errorf("%s verification failed: %w", v.name, err))
+			errors = append(errors, flaterrors.Join(err, fmt.Errorf("verification=%s", v.name), errVerificationFailed))
 		}
 	}
 
@@ -244,7 +262,7 @@ func BuildEdgectlBinary(edgectlSourceDir string) (string, error) {
 	// Create a temporary directory for the binary
 	tmpDir, err := os.MkdirTemp("", "edgectl-build-")
 	if err != nil {
-		return "", fmt.Errorf("failed to create temporary directory: %w", err)
+		return "", flaterrors.Join(err, errCreateTempDirForBuild)
 	}
 
 	binaryPath := filepath.Join(tmpDir, "edgectl")
@@ -256,7 +274,7 @@ func BuildEdgectlBinary(edgectlSourceDir string) (string, error) {
 		if err := os.RemoveAll(tmpDir); err != nil {
 			slog.Error("error removing temp dir", "err", err.Error(), "tempDir", tmpDir)
 		}
-		return "", fmt.Errorf("failed to build edgectl binary: %w", err)
+		return "", flaterrors.Join(err, errBuildEdgectl)
 	}
 
 	return binaryPath, nil

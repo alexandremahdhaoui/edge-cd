@@ -1,14 +1,26 @@
 package provision
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
 	"gopkg.in/yaml.v3"
+)
+
+var (
+	errLoadServiceManagerConfig   = errors.New("failed to load service manager config")
+	errCopyServiceFile            = errors.New("failed to copy service file")
+	errEnableService              = errors.New("failed to enable service")
+	errStartService               = errors.New("failed to start service")
+	errReadServiceManagerConfigFile = errors.New("failed to read service manager config file")
+	errParseServiceManagerConfig    = errors.New("failed to parse service manager config")
 )
 
 // ServiceManagerConfig represents the structure of service manager config files
@@ -26,6 +38,7 @@ func SetupEdgeCDService(
 	runner ssh.Runner,
 	svcmgrName, edgeCDRepoPath string,
 ) error {
+	var stdout, stderr string
 	// Load the service manager configuration
 	config, err := loadServiceManagerConfig(edgeCDRepoPath, svcmgrName)
 	if err != nil {
@@ -44,28 +57,18 @@ func SetupEdgeCDService(
 	serviceDestPath := config.EdgeCDService.DestinationPath
 
 	// Copy service file to destination using the context
-	fmt.Printf("Copying service file from %s to %s...\n", serviceSourcePath, serviceDestPath)
-	stdout, stderr, err := runner.Run(execCtx, "cp", serviceSourcePath, serviceDestPath)
+	slog.Info("copying service file", "source", serviceSourcePath, "dest", serviceDestPath)
+	stdout, stderr, err = runner.Run(execCtx, "cp", serviceSourcePath, serviceDestPath)
 	if err != nil {
-		return fmt.Errorf(
-			"failed to copy service file: %w. Stdout: %s, Stderr: %s",
-			err,
-			stdout,
-			stderr,
-		)
+		return flaterrors.Join(err, fmt.Errorf("serviceSourcePath=%s serviceDestPath=%s stdout=%s stderr=%s", serviceSourcePath, serviceDestPath, stdout, stderr), errCopyServiceFile)
 	}
 
 	// Build and execute enable command
 	enableCmdRaw := substituteServiceName(config.Commands["enable"], "edge-cd")
-	fmt.Printf("Enabling service %s...\n", svcmgrName)
+	slog.Info("enabling service", "serviceManager", svcmgrName)
 	stdout, stderr, err = runner.Run(execCtx, enableCmdRaw...)
 	if err != nil {
-		return fmt.Errorf(
-			"failed to enable service: %w. Stdout: %s, Stderr: %s",
-			err,
-			stdout,
-			stderr,
-		)
+		return flaterrors.Join(err, fmt.Errorf("stdout=%s stderr=%s", stdout, stderr), errEnableService)
 	}
 
 	// Build and execute start command (fallback to restart if start doesn't exist)
@@ -78,15 +81,10 @@ func SetupEdgeCDService(
 	}
 
 	if len(startCmdRaw) > 0 {
-		fmt.Printf("Starting service %s...\n", svcmgrName)
+		slog.Info("starting service", "serviceManager", svcmgrName)
 		stdout, stderr, err = runner.Run(execCtx, startCmdRaw...)
 		if err != nil {
-			return fmt.Errorf(
-				"failed to start service: %w. Stdout: %s, Stderr: %s",
-				err,
-				stdout,
-				stderr,
-			)
+			return flaterrors.Join(err, fmt.Errorf("stdout=%s stderr=%s", stdout, stderr), errStartService)
 		}
 	}
 
@@ -108,12 +106,12 @@ func loadServiceManagerConfig(
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read service manager config file: %w", err)
+		return nil, flaterrors.Join(err, errReadServiceManagerConfigFile)
 	}
 
 	var config ServiceManagerConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse service manager config: %w", err)
+		return nil, flaterrors.Join(err, errParseServiceManagerConfig)
 	}
 
 	return &config, nil
