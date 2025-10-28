@@ -28,13 +28,17 @@ SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
 
 declare -ga BACKUP_EXTRA_ENVS
 
+function get_config_spec_abspath() {
+	echo "${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_PATH}/${CONFIG_SPEC_FILE}"
+}
+
 function set_extra_envs() {
 	# Clear the list of variables to reset from any previous run
 	BACKUP_EXTRA_ENVS=()
 
 	local key value
 	local yq_output
-	yq_output=$(yq '(.extraEnvs // []) | .[] | to_entries | .[] | .key + "=" + .value' "${CONFIG_PATH}")
+	yq_output=$(yq '(.extraEnvs // []) | .[] | to_entries | .[] | .key + "=" + .value' "$(get_config_spec_abspath)")
 
 	if [[ -n "${yq_output}" ]]; then # Only process if yq returned something
 		while IFS='=' read -r key value; do
@@ -51,7 +55,7 @@ function set_extra_envs() {
 			fi
 
 			declare -gx "$key=$value"
-		done <<< "${yq_output}"
+		done <<<"${yq_output}"
 	fi
 }
 function reset_extra_envs() {

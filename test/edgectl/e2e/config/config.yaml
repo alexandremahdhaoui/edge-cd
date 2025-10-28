@@ -2,7 +2,7 @@ pollingIntervalSecond: 5
 
 config:
   spec: config.yaml
-  path: /home/ubuntu/edge-cd-config
+  path: ./test/edgectl/e2e/config
   repo:
     destPath: /home/ubuntu/edge-cd-config
     url: ssh://git@192.168.122.87:22/srv/git/user-config.git
@@ -12,6 +12,9 @@ edgeCD:
     branch: main
     destinationPath: /usr/local/src/edge-cd
     url: ssh://git@192.168.122.87:22/srv/git/edge-cd.git
+
+extraEnvs:
+  - GIT_SSH_COMMAND: "ssh -i /home/ubuntu/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 log:
   format: console

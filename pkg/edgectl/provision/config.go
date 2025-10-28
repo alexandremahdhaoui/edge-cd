@@ -12,6 +12,7 @@ import (
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
+	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -19,6 +20,8 @@ var (
 	errRenderConfigTemplate = errors.New("failed to render config template")
 	errPlaceConfigYAML      = errors.New("failed to place config.yaml")
 	errReadLocalConfig      = errors.New("failed to read local config file")
+	errUnmarshalConfig      = errors.New("failed to unmarshal config")
+	errMarshalConfig        = errors.New("failed to marshal config")
 )
 
 const configTemplate = `
@@ -120,4 +123,40 @@ func ReadLocalConfig(configPath, configSpec string) (string, error) {
 		return "", flaterrors.Join(err, fmt.Errorf("fullPath=%s", fullPath), errReadLocalConfig)
 	}
 	return string(content), nil
+}
+
+// ReplaceRepoURLsInConfig replaces the repository URLs in a config YAML string.
+// This is used when a static config file is provided but dynamic repo URLs need to be injected.
+func ReplaceRepoURLsInConfig(configContent, edgeCDRepoURL, configRepoURL string) (string, error) {
+	// Parse the YAML into a generic map
+	var config map[string]interface{}
+	if err := yaml.Unmarshal([]byte(configContent), &config); err != nil {
+		return "", flaterrors.Join(err, errUnmarshalConfig)
+	}
+
+	// Replace edgeCD repo URL if provided
+	if edgeCDRepoURL != "" {
+		if edgeCD, ok := config["edgeCD"].(map[string]interface{}); ok {
+			if repo, ok := edgeCD["repo"].(map[string]interface{}); ok {
+				repo["url"] = edgeCDRepoURL
+			}
+		}
+	}
+
+	// Replace config repo URL if provided
+	if configRepoURL != "" {
+		if configSection, ok := config["config"].(map[string]interface{}); ok {
+			if repo, ok := configSection["repo"].(map[string]interface{}); ok {
+				repo["url"] = configRepoURL
+			}
+		}
+	}
+
+	// Marshal back to YAML
+	updatedContent, err := yaml.Marshal(config)
+	if err != nil {
+		return "", flaterrors.Join(err, errMarshalConfig)
+	}
+
+	return string(updatedContent), nil
 }

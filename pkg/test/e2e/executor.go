@@ -3,14 +3,17 @@ package e2e
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
+	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -27,6 +30,9 @@ var (
 	errCreateTempDirForBuild       = errors.New("failed to create temporary directory")
 	errBuildEdgectl                = errors.New("failed to build edgectl binary")
 	errRemoveTempDirAfterBuild     = errors.New("error removing temp dir")
+	errFetchConfig                 = errors.New("failed to fetch config from target VM")
+	errParseConfig                 = errors.New("failed to parse config YAML")
+	errFileNotCreatedByService     = errors.New("file not created by edge-cd service within timeout")
 )
 
 // ExecutorConfig contains configuration for bootstrap test execution
@@ -147,9 +153,22 @@ func ExecuteBootstrapTest(
 		),
 	)
 
-	// Show command output
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	// Create bootstrap log file
+	bootstrapLogPath := filepath.Join(env.ArtifactPath, "bootstrap.log")
+	bootstrapLogFile, err := os.Create(bootstrapLogPath)
+	if err != nil {
+		return flaterrors.Join(err, fmt.Errorf("failed to create bootstrap log file at %s", bootstrapLogPath))
+	}
+	defer bootstrapLogFile.Close()
+
+	// Store log path in environment and track for cleanup
+	env.BootstrapLogPath = bootstrapLogPath
+	env.ManagedResources = append(env.ManagedResources, bootstrapLogPath)
+
+	// Show command output to both stderr and log file
+	multiWriter := io.MultiWriter(os.Stderr, bootstrapLogFile)
+	cmd.Stdout = multiWriter
+	cmd.Stderr = multiWriter
 
 	// Run bootstrap command
 	if err := cmd.Run(); err != nil {
@@ -171,6 +190,32 @@ func ExecuteBootstrapTest(
 	env.Status = "passed"
 
 	return nil
+}
+
+// EdgeCDConfig represents the structure of edge-cd config.yaml
+type EdgeCDConfig struct {
+	Files []string `yaml:"files"`
+}
+
+// waitForFile polls for a file to exist on the target VM, up to maxWait duration
+func waitForFile(ctx execcontext.Context, sshClient *ssh.Client, filePath string, maxWait time.Duration) error {
+	deadline := time.Now().Add(maxWait)
+	checkInterval := 2 * time.Second
+
+	for time.Now().Before(deadline) {
+		_, _, err := sshClient.Run(ctx, "[", "-f", filePath, "]")
+		if err == nil {
+			slog.Info("file created by edge-cd service", "file", filePath)
+			return nil
+		}
+
+		time.Sleep(checkInterval)
+	}
+
+	return flaterrors.Join(
+		fmt.Errorf("filePath=%s timeout=%s", filePath, maxWait),
+		errFileNotCreatedByService,
+	)
 }
 
 // verifyBootstrapResults checks that all expected files and services exist after bootstrap
@@ -195,6 +240,10 @@ func verifyBootstrapResults(
 		{
 			name:    "openssh-client package installed",
 			command: []string{"dpkg", "-s", "openssh-client"},
+		},
+		{
+			name:    "yq installed",
+			command: []string{"which", "yq"},
 		},
 		{
 			name:    "edge-cd repository cloned",
@@ -251,6 +300,37 @@ func verifyBootstrapResults(
 		if err != nil {
 			errors = append(errors, flaterrors.Join(err, fmt.Errorf("verification=%s", v.name), errVerificationFailed))
 		}
+	}
+
+	// Fetch and verify files specified in config.yaml are created by edge-cd service
+	slog.Info("fetching config.yaml from target VM to verify edge-cd service file synchronization")
+	configContent, stderr, err := sshClient.Run(verifyCtx, "cat", "/etc/edge-cd/config.yaml")
+	if err != nil {
+		errors = append(errors, flaterrors.Join(
+			err,
+			fmt.Errorf("stderr=%s", stderr),
+			errFetchConfig,
+		))
+		return errors
+	}
+
+	// Parse config to extract files list
+	var config EdgeCDConfig
+	if err := yaml.Unmarshal([]byte(configContent), &config); err != nil {
+		errors = append(errors, flaterrors.Join(err, errParseConfig))
+		return errors
+	}
+
+	// Wait for each file to be created by the edge-cd service (up to 60 seconds each)
+	if len(config.Files) > 0 {
+		slog.Info("waiting for edge-cd service to create files", "count", len(config.Files))
+		for _, filePath := range config.Files {
+			if err := waitForFile(verifyCtx, sshClient, filePath, 60*time.Second); err != nil {
+				errors = append(errors, err)
+			}
+		}
+	} else {
+		slog.Info("no files specified in config.yaml, skipping file verification")
 	}
 
 	return errors

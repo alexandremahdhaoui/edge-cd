@@ -29,6 +29,7 @@ type TestEnvironment struct {
 	TargetVM         vmm.VMMetadata    // Target VM being tested
 	GitServerVM      vmm.VMMetadata    // Git server VM for config repos
 	ArtifactPath     string            // Root directory for all test artifacts
+	BootstrapLogPath string            // Path to the bootstrap command log file (stored in ArtifactPath)
 	TempDirRoot      string            // Root temp directory: /tmp/e2e-<test-id>. All component subdirs created here
 	SSHKeys          SSHKeyInfo        // Paths to SSH keys used in this environment
 	Status           string            // Current status: "setup", "running", "passed", "failed", "cleanup"

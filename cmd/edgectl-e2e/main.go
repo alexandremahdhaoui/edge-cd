@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
 	te2e "github.com/alexandremahdhaoui/edge-cd/pkg/test/e2e"
 )
 
@@ -25,6 +26,8 @@ Commands:
   run <test-id>      Run tests in an existing environment
   delete <test-id>   Cleanup and destroy a test environment
   list               List all known test environments and their status
+  logs <test-id> <log-type>  Display logs for a test environment
+                             Log types: bootstrap, service
   test               One-shot test (create → run → delete)
 
 Environment Variables:
@@ -39,6 +42,12 @@ Examples:
 
   # Run tests in that environment
   edgectl-e2e run e2e-20231025-abc123
+
+  # View bootstrap logs
+  edgectl-e2e logs e2e-20231025-abc123 bootstrap
+
+  # View service logs from target VM
+  edgectl-e2e logs e2e-20231025-abc123 service
 
   # Cleanup when done
   edgectl-e2e delete e2e-20231025-abc123
@@ -87,6 +96,14 @@ Examples:
 		cmdDelete(execCtx, artifactStoreDir, os.Args[2])
 	case "list":
 		cmdList(execCtx, artifactStoreDir)
+	case "logs":
+		if len(os.Args) < 4 {
+			fmt.Fprintf(os.Stderr, "Error: 'logs' requires a test ID and log type\n")
+			fmt.Fprintf(os.Stderr, "Usage: edgectl-e2e logs <test-id> <log-type>\n")
+			fmt.Fprintf(os.Stderr, "  Log types: bootstrap, service\n")
+			os.Exit(1)
+		}
+		cmdLogs(execCtx, artifactStoreDir, os.Args[2], os.Args[3])
 	case "test":
 		cmdTest(execCtx, artifactStoreDir)
 	case "-h", "--help", "help":
@@ -397,6 +414,90 @@ func cmdGet(ctx execcontext.Context, artifactStoreDir string, testID string) {
 	fmt.Fprintf(os.Stderr, "=== SSH Keys ===\n")
 	fmt.Fprintf(os.Stderr, "Host Key: %s\n", env.SSHKeys.HostKeyPath)
 	fmt.Fprintf(os.Stderr, "Host Pub: %s\n", env.SSHKeys.HostKeyPubPath)
+}
+
+// cmdLogs displays logs for a test environment
+func cmdLogs(ctx execcontext.Context, artifactStoreDir string, testID string, logType string) {
+	artifactStoreFile := filepath.Join(artifactStoreDir, "artifacts.json")
+	store := te2e.NewJSONArtifactStore(artifactStoreFile)
+
+	// Load environment
+	env, err := store.Load(ctx, testID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to load test environment: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Validate and handle log type
+	switch logType {
+	case "bootstrap":
+		// Display bootstrap logs
+		if env.BootstrapLogPath == "" {
+			fmt.Fprintf(os.Stderr, "Error: Bootstrap log path not set for environment %s\n", testID)
+			os.Exit(1)
+		}
+
+		// Check if log file exists
+		if _, err := os.Stat(env.BootstrapLogPath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Error: Bootstrap log not found for environment %s\n", testID)
+			fmt.Fprintf(os.Stderr, "Expected location: %s\n", env.BootstrapLogPath)
+			os.Exit(1)
+		}
+
+		// Read and display log file
+		content, err := os.ReadFile(env.BootstrapLogPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to read bootstrap log: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Print to stdout
+		fmt.Print(string(content))
+
+	case "service":
+		// Display service logs from target VM
+		if env.TargetVM.IP == "" {
+			fmt.Fprintf(os.Stderr, "Error: Target VM IP not set for environment %s\n", testID)
+			os.Exit(1)
+		}
+
+		// Create SSH client to target VM
+		sshClient, err := ssh.NewClient(
+			env.TargetVM.IP,
+			"ubuntu",
+			env.SSHKeys.HostKeyPath,
+			"22",
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to create SSH client: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Execute journalctl command to get service logs
+		ctx = execcontext.New(nil, []string{"sudo", "-E"})
+		stdout, stderr, err := sshClient.Run(
+			ctx,
+			"journalctl",
+			"-u",
+			"edge-cd.service",
+			"--no-pager",
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to fetch service logs: %v\n", err)
+			if stderr != "" {
+				fmt.Fprintf(os.Stderr, "stderr: %s\n", stderr)
+			}
+			os.Exit(1)
+		}
+
+		// Print service logs to stdout
+		fmt.Print(stdout)
+
+	default:
+		fmt.Fprintf(os.Stderr, "Error: invalid log type '%s'\n", logType)
+		fmt.Fprintf(os.Stderr, "Valid log types: bootstrap, service\n")
+		os.Exit(1)
+	}
 }
 
 // cmdList lists all test environments

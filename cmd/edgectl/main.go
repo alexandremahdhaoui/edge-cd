@@ -21,6 +21,7 @@ var (
 	errCreateTempDir       = errors.New("failed to create temporary directory")
 	errCloneLocalRepo      = errors.New("failed to clone edge-cd repository locally")
 	errProvisionPackages   = errors.New("failed to provision packages")
+	errInstallYq           = errors.New("failed to install yq")
 	errCloneUserConfigRepo = errors.New("failed to clone user config repo")
 	errReadLocalConfig     = errors.New("failed to read local config")
 	errRenderConfig        = errors.New("failed to render config template")
@@ -223,6 +224,12 @@ func main() {
 			}
 		}
 
+		// Install yq (required by edge-cd service)
+		if err := provision.InstallYq(targetExecCtx, sshClient); err != nil {
+			slog.Error("bootstrap failed", "error", flaterrors.Join(err, errInstallYq).Error())
+			os.Exit(1)
+		}
+
 		configGitRepo := provision.GitRepo{
 			URL:    *configRepo,
 			Branch: *configBranch,
@@ -247,6 +254,20 @@ func main() {
 					flaterrors.Join(err, errReadLocalConfig).Error(),
 				)
 				os.Exit(1)
+			}
+
+			// Replace repo URLs in the config if they were provided as flags
+			// This allows using a static config file with dynamic repo URLs
+			if *edgeCDRepo != "" || *configRepo != "" {
+				configContent, err = provision.ReplaceRepoURLsInConfig(configContent, *edgeCDRepo, *configRepo)
+				if err != nil {
+					slog.Error(
+						"bootstrap failed",
+						"error",
+						fmt.Errorf("failed to replace repo URLs in config: %w", err),
+					)
+					os.Exit(1)
+				}
 			}
 		} else {
 			configData := provision.ConfigTemplateData{

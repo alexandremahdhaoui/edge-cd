@@ -38,17 +38,12 @@ SVCMGR_DIR="${SRC_DIR}/service-managers"
 [ -z "${__LOADED_LIB_SVCMGR:-}" ] && . "${LIB_DIR}/svcmgr.sh"
 
 # ----------------------------------------------------------------
-# Envs
-# ----------------------------------------------------------------
-
-# -- variable required for bootstrapping
-CONFIG_PATH="${CONFIG_PATH:-/etc/edge-cd/config.yaml}"
-
-# ----------------------------------------------------------------
 # General config
 # ----------------------------------------------------------------
 # If config, edge-cd.sh or edge-cd.service files change we restart
 # the process (exit 0)
+#
+# Please note that CONFIG_PATH must be specifed
 
 __DEFAULT_EDGE_CD_REPO_BRANCH=main
 __DEFAULT_EDGE_CD_REPO_DESTINATION_PATH=/usr/local/src/edge-cd
@@ -58,13 +53,12 @@ __DEFAULT_EDGE_CD_COMMIT_PATH=/tmp/edge-cd/edge-cd-last-synchronized-commit.txt
 __DEFAULT_CONFIG_COMMIT_PATH=/tmp/edge-cd/config-last-synchronized-commit.txt
 
 __DEFAULT_CONFIG_REPO_BRANCH=main
-__DEFAULT_CONFIG_REPO_URL=
 __DEFAULT_CONFIG_REPO_DESTINATION_PATH=/usr/local/src/edge-cd-config
+__DEFAULT_CONFIG_SPEC_FILE=spec.yaml
 
 function declare_config() {
 	# -- declare vars
-	declare CONFIG_SPEC
-	declare CONFIG_PATH
+	declare CONFIG_SPEC_FILE
 	declare CONFIG_REPO_BRANCH
 	declare CONFIG_REPO_DESTINATION_PATH
 	declare CONFIG_REPO_URL
@@ -77,8 +71,7 @@ function declare_config() {
 	declare CONFIG_COMMIT_PATH
 
 	# -- declare backup vars
-	declare __BACKUP_CONFIG_SPEC
-	declare __BACKUP_CONFIG_PATH
+	declare __BACKUP_CONFIG_SPEC_FILE
 	declare __BACKUP_CONFIG_REPO_DESTINATION_PATH
 	declare __BACKUP_CONFIG_REPO_URL
 
@@ -94,8 +87,7 @@ function init_config() {
 	set_extra_envs
 
 	# -- user config
-	__BACKUP_CONFIG_SPEC="$(read_value CONFIG_SPEC '.config.spec')"
-	__BACKUP_CONFIG_PATH="$(read_value CONFIG_PATH '.config.path')"
+	__BACKUP_CONFIG_SPEC_FILE="$(read_value CONFIG_SPEC_FILE '.config.spec' "${__DEFAULT_CONFIG_SPEC_FILE}")"
 	__BACKUP_CONFIG_REPO_BRANCH="$(read_value CONFIG_REPO_BRANCH '.config.repo.branch' "${__DEFAULT_CONFIG_REPO_BRANCH}")"
 	__BACKUP_CONFIG_REPO_DESTINATION_PATH="$(read_value CONFIG_REPO_DESTINATION_PATH '.config.repo.destPath' "${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}")"
 	__BACKUP_CONFIG_REPO_URL="$(read_value CONFIG_REPO_URL '.config.repo.url')"
@@ -112,8 +104,7 @@ function init_config() {
 function reset_config() {
 	reset_extra_envs
 
-	CONFIG_SPEC="${__BACKUP_CONFIG_SPEC}"
-	CONFIG_PATH="${__BACKUP_CONFIG_PATH}"
+	CONFIG_SPEC_FILE="${__BACKUP_CONFIG_SPEC_FILE}"
 
 	CONFIG_REPO_BRANCH="${__BACKUP_CONFIG_REPO_BRANCH}"
 	CONFIG_REPO_DESTINATION_PATH="${__BACKUP_CONFIG_REPO_DESTINATION_PATH}"
@@ -178,7 +169,7 @@ function clone_repo_config() {
 	git clone --filter=blob:none --no-checkout "${CONFIG_REPO_URL}" "${CONFIG_REPO_DESTINATION_PATH}"
 
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout init
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_SPEC_FILE_FILE}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" checkout "${CONFIG_REPO_BRANCH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" pull
@@ -190,7 +181,7 @@ function sync_repo_config() {
 		return 0
 	fi
 	logInfo "Pulling config repo"
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_SPEC_FILE_FILE}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" reset --hard FETCH_HEAD
 }
@@ -314,7 +305,7 @@ function reconcile_files() {
 	logInfo "Reconciling files"
 
 	local -a files
-	readarray files < <(yq e -o=j -I=0 '.files[]' "${CONFIG_PATH}")
+	readarray files < <(yq e -o=j -I=0 '.files[]' "${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_SPEC_FILE}")
 
 	local fileSpec
 	for fileSpec in "${files[@]}"; do

@@ -256,6 +256,16 @@ func setupTargetVM(
 		return nil, flaterrors.Join(err, errTargetVMSSHNotReady)
 	}
 
+	// Wait for cloud-init to complete (ensures SSH key generation is done)
+	slog.Info("waiting for cloud-init to complete on target VM")
+	_, stderr, err := sshClient.Run(execCtx, "cloud-init", "status", "--wait")
+	if err != nil {
+		slog.Warn("cloud-init status check failed, continuing anyway", "stderr", stderr, "error", err)
+		// Don't fail here - cloud-init might not be available or already completed
+	} else {
+		slog.Info("cloud-init completed successfully")
+	}
+
 	return metadata, nil
 }
 

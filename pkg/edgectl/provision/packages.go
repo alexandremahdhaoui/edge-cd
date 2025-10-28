@@ -19,6 +19,10 @@ var (
 	errCloneEdgeCDRepo             = errors.New("failed to clone edge-cd repository on remote")
 	errUpdatePackageManager        = errors.New("failed to update package manager")
 	errInstallPackages             = errors.New("failed to install packages")
+	errInstallYq                   = errors.New("failed to install yq")
+	errCheckYqInstallation         = errors.New("failed to check yq installation")
+	errDownloadYq                  = errors.New("failed to download yq")
+	errMakeYqExecutable            = errors.New("failed to make yq executable")
 )
 
 // PackageManager holds the commands for a specific package manager.
@@ -95,5 +99,52 @@ func ProvisionPackages(
 	}
 
 	slog.Info("successfully provisioned packages")
+	return nil
+}
+
+// InstallYq installs yq on the remote device if not already installed.
+// This function is idempotent - it checks if yq is already installed before attempting installation.
+func InstallYq(
+	execCtx execcontext.Context,
+	runner ssh.Runner,
+) error {
+	slog.Info("checking if yq is installed")
+
+	// Check if yq is already installed (idempotency check)
+	_, _, err := runner.Run(execCtx, "which", "yq")
+	if err == nil {
+		slog.Info("yq is already installed, skipping installation")
+		return nil
+	}
+
+	slog.Info("yq not found, installing yq")
+
+	// Download yq to /usr/local/bin
+	stdout, stderr, err := runner.Run(
+		execCtx,
+		"wget",
+		"-qO",
+		"/usr/local/bin/yq",
+		"https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64",
+	)
+	if err != nil {
+		return flaterrors.Join(
+			err,
+			fmt.Errorf("stdout=%s stderr=%s", stdout, stderr),
+			errDownloadYq,
+		)
+	}
+
+	// Make yq executable
+	stdout, stderr, err = runner.Run(execCtx, "chmod", "a+x", "/usr/local/bin/yq")
+	if err != nil {
+		return flaterrors.Join(
+			err,
+			fmt.Errorf("stdout=%s stderr=%s", stdout, stderr),
+			errMakeYqExecutable,
+		)
+	}
+
+	slog.Info("successfully installed yq")
 	return nil
 }
