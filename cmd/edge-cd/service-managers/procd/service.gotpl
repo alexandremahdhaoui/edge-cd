@@ -30,6 +30,27 @@ start_service() {
   {{- if .ConfigPath }}
   procd_set_param env CONFIG_PATH={{ .ConfigPath }}
   {{- end }}
+  {{- if .ConfigSpecFile }}
+  procd_set_param env CONFIG_SPEC_FILE={{ .ConfigSpecFile }}
+  {{- end }}
+  {{- if .ConfigRepoBranch }}
+  procd_set_param env CONFIG_REPO_BRANCH={{ .ConfigRepoBranch }}
+  {{- end }}
+  {{- if .ConfigRepoDestinationPath }}
+  procd_set_param env CONFIG_REPO_DESTINATION_PATH={{ .ConfigRepoDestinationPath }}
+  {{- end }}
+  {{- if .ConfigRepoURL }}
+  procd_set_param env CONFIG_REPO_URL={{ .ConfigRepoURL }}
+  {{- end }}
+  {{- if .EdgeCDRepoBranch }}
+  procd_set_param env EDGE_CD_REPO_BRANCH={{ .EdgeCDRepoBranch }}
+  {{- end }}
+  {{- if .EdgeCDRepoDestinationPath }}
+  procd_set_param env EDGE_CD_REPO_DESTINATION_PATH={{ .EdgeCDRepoDestinationPath }}
+  {{- end }}
+  {{- if .EdgeCDRepoURL }}
+  procd_set_param env EDGE_CD_REPO_URL={{ .EdgeCDRepoURL }}
+  {{- end }}
   {{- range .EnvironmentVars }}
   procd_set_param env {{.Key}}={{.Value}}
   {{- end }}

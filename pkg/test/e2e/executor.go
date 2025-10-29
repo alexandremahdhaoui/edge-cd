@@ -17,22 +17,26 @@ import (
 )
 
 var (
-	errInvalidTestEnvironment      = errors.New("invalid test environment: nil or empty ID")
-	errTargetVMIPNotSet            = errors.New("target VM IP address not set")
-	errGitServerVMIPNotSet         = errors.New("git server VM IP address not set")
-	errEdgectlBinaryRequired       = errors.New("EdgectlBinaryPath is required")
-	errCreateSSHClientForExecutor  = errors.New("failed to create SSH client")
-	errEdgeCDRepoURLNotFound       = errors.New("edge-cd repository URL not found in test environment")
-	errUserConfigRepoURLNotFound   = errors.New("user-config repository URL not found in test environment")
-	errBootstrapCommand            = errors.New("bootstrap command failed")
-	errBootstrapVerification       = errors.New("bootstrap verification failed")
-	errVerificationFailed          = errors.New("verification failed")
-	errCreateTempDirForBuild       = errors.New("failed to create temporary directory")
-	errBuildEdgectl                = errors.New("failed to build edgectl binary")
-	errRemoveTempDirAfterBuild     = errors.New("error removing temp dir")
-	errFetchConfig                 = errors.New("failed to fetch config from target VM")
-	errParseConfig                 = errors.New("failed to parse config YAML")
-	errFileNotCreatedByService     = errors.New("file not created by edge-cd service within timeout")
+	errInvalidTestEnvironment     = errors.New("invalid test environment: nil or empty ID")
+	errTargetVMIPNotSet           = errors.New("target VM IP address not set")
+	errGitServerVMIPNotSet        = errors.New("git server VM IP address not set")
+	errEdgectlBinaryRequired      = errors.New("EdgectlBinaryPath is required")
+	errCreateSSHClientForExecutor = errors.New("failed to create SSH client")
+	errEdgeCDRepoURLNotFound      = errors.New(
+		"edge-cd repository URL not found in test environment",
+	)
+	errUserConfigRepoURLNotFound = errors.New(
+		"user-config repository URL not found in test environment",
+	)
+	errBootstrapCommand        = errors.New("bootstrap command failed")
+	errBootstrapVerification   = errors.New("bootstrap verification failed")
+	errVerificationFailed      = errors.New("verification failed")
+	errCreateTempDirForBuild   = errors.New("failed to create temporary directory")
+	errBuildEdgectl            = errors.New("failed to build edgectl binary")
+	errRemoveTempDirAfterBuild = errors.New("error removing temp dir")
+	errFetchConfig             = errors.New("failed to fetch config from target VM")
+	errParseConfig             = errors.New("failed to parse config YAML")
+	errFileNotCreatedByService = errors.New("file not created by edge-cd service within timeout")
 )
 
 // ExecutorConfig contains configuration for bootstrap test execution
@@ -157,7 +161,10 @@ func ExecuteBootstrapTest(
 	bootstrapLogPath := filepath.Join(env.ArtifactPath, "bootstrap.log")
 	bootstrapLogFile, err := os.Create(bootstrapLogPath)
 	if err != nil {
-		return flaterrors.Join(err, fmt.Errorf("failed to create bootstrap log file at %s", bootstrapLogPath))
+		return flaterrors.Join(
+			err,
+			fmt.Errorf("failed to create bootstrap log file at %s", bootstrapLogPath),
+		)
 	}
 	defer bootstrapLogFile.Close()
 
@@ -192,28 +199,47 @@ func ExecuteBootstrapTest(
 	return nil
 }
 
-// EdgeCDConfig represents the structure of edge-cd config.yaml
-type EdgeCDConfig struct {
-	Files []string `yaml:"files"`
+// EdgeCDSpec represents the structure of edge-cd config.yaml
+type EdgeCDSpec struct {
+	Files []struct {
+		SrcPath  string `yaml:"srcPath"`
+		DestPath string `yaml:"destPath"`
+	} `yaml:"files"`
 }
 
-// waitForFile polls for a file to exist on the target VM, up to maxWait duration
-func waitForFile(ctx execcontext.Context, sshClient *ssh.Client, filePath string, maxWait time.Duration) error {
+// waitForFiles polls for a file to exist on the target VM, up to maxWait duration
+func waitForFiles(
+	ctx execcontext.Context,
+	sshClient *ssh.Client,
+	files []string,
+	maxWait time.Duration,
+) error {
 	deadline := time.Now().Add(maxWait)
 	checkInterval := 2 * time.Second
 
+	fSet := make(map[string]struct{})
+
 	for time.Now().Before(deadline) {
-		_, _, err := sshClient.Run(ctx, "[", "-f", filePath, "]")
-		if err == nil {
-			slog.Info("file created by edge-cd service", "file", filePath)
+		for _, f := range files {
+			_, _, err := sshClient.Run(ctx, "[", "-f", f, "]")
+			if err != nil {
+				continue
+			}
+			fSet[f] = struct{}{}
+		}
+		if len(fSet) == len(files) {
+			slog.Info(
+				"all exepcted files created by edge-cd service",
+				"files",
+				fmt.Sprintf("%+v", files),
+			)
 			return nil
 		}
-
 		time.Sleep(checkInterval)
 	}
 
 	return flaterrors.Join(
-		fmt.Errorf("filePath=%s timeout=%s", filePath, maxWait),
+		fmt.Errorf("files=%s timeout=%s", files, maxWait),
 		errFileNotCreatedByService,
 	)
 }
@@ -298,7 +324,10 @@ func verifyBootstrapResults(
 	for _, v := range verifications {
 		_, _, err := sshClient.Run(verifyCtx, v.command...)
 		if err != nil {
-			errors = append(errors, flaterrors.Join(err, fmt.Errorf("verification=%s", v.name), errVerificationFailed))
+			errors = append(
+				errors,
+				flaterrors.Join(err, fmt.Errorf("verification=%s", v.name), errVerificationFailed),
+			)
 		}
 	}
 
@@ -314,20 +343,22 @@ func verifyBootstrapResults(
 		return errors
 	}
 
-	// Parse config to extract files list
-	var config EdgeCDConfig
-	if err := yaml.Unmarshal([]byte(configContent), &config); err != nil {
+	// Parse spec to extract files list
+	var spec EdgeCDSpec
+	if err := yaml.Unmarshal([]byte(configContent), &spec); err != nil {
 		errors = append(errors, flaterrors.Join(err, errParseConfig))
 		return errors
 	}
+	expectedFiles := make([]string, 0)
+	for _, f := range spec.Files {
+		expectedFiles = append(expectedFiles, f.DestPath)
+	}
 
 	// Wait for each file to be created by the edge-cd service (up to 60 seconds each)
-	if len(config.Files) > 0 {
-		slog.Info("waiting for edge-cd service to create files", "count", len(config.Files))
-		for _, filePath := range config.Files {
-			if err := waitForFile(verifyCtx, sshClient, filePath, 60*time.Second); err != nil {
-				errors = append(errors, err)
-			}
+	if len(spec.Files) > 0 {
+		slog.Info("waiting for edge-cd service to create files", "count", len(spec.Files))
+		if err := waitForFiles(verifyCtx, sshClient, expectedFiles, 60*time.Second); err != nil {
+			errors = append(errors, err)
 		}
 	} else {
 		slog.Info("no files specified in config.yaml, skipping file verification")

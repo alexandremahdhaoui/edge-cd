@@ -12,8 +12,16 @@ SRC_DIR="$(dirname "${BASH_SOURCE[0]}")/../../.."
 TMP_DIR=$(mktemp -d)
 cp -R "${SRC_DIR}/cmd/edge-cd" "${TMP_DIR}/edge-cd"
 
-# Set CONFIG_PATH to a temporary config file within the test environment
-export CONFIG_PATH="${TMP_DIR}/edge-cd/config.yaml"
+# Set up config path variables for testing
+# CONFIG_PATH is the relative directory path within the config repo
+export CONFIG_PATH="."
+# CONFIG_REPO_DESTINATION_PATH is where the config repo is located
+export CONFIG_REPO_DESTINATION_PATH="${TMP_DIR}/edge-cd"
+# CONFIG_SPEC_FILE is the name of the spec file
+export CONFIG_SPEC_FILE="config.yaml"
+# Set default values that would normally come from edge-cd script
+export __DEFAULT_CONFIG_REPO_DESTINATION_PATH="/usr/local/src/edge-cd-config"
+export __DEFAULT_CONFIG_SPEC_FILE="spec.yaml"
 
 # Set SRC_DIR for sourced scripts to use the temporary directory
 export SRC_DIR="${TMP_DIR}/edge-cd"
@@ -108,7 +116,7 @@ logInfo "Running Task 22: Test __get_svc_mgr_name"
 
 # Test Case 22.1: Retrieve service manager name (procd)
 echo "serviceManager:
-  name: procd" > "${CONFIG_PATH}"
+  name: procd" > "$(get_config_spec_abspath)"
 
 ACTUAL_NAME=$(__get_svc_mgr_name)
 assert_equals "procd" "${ACTUAL_NAME}" "__get_svc_mgr_name: procd name retrieved"
@@ -120,7 +128,7 @@ logInfo "Running Task 23: Test __get_svc_mgr_path"
 
 # Test Case 23.1: Retrieve service manager path (procd)
 echo "serviceManager:
-  name: procd" > "${CONFIG_PATH}"
+  name: procd" > "$(get_config_spec_abspath)"
 
 ACTUAL_PATH=$(__get_svc_mgr_path)
 EXPECTED_PATH="${TMP_DIR}/edge-cd/service-managers/procd"
@@ -133,7 +141,7 @@ logInfo "Running Task 24: Test __read_svc_mgr_config"
 
 # Test Case 24.1: Read from procd config
 echo "serviceManager:
-  name: procd" > "${CONFIG_PATH}"
+  name: procd" > "$(get_config_spec_abspath)"
 mkdir -p "${TMP_DIR}/edge-cd/service-managers/procd"
 echo "commands:
   enable:
@@ -155,7 +163,7 @@ logInfo "Running Task 25: Test restart_service"
 
 # Test Case 25.1: Restart a service using fake-svc
 echo "serviceManager:
-  name: fake-svc" > "${CONFIG_PATH}"
+  name: fake-svc" > "$(get_config_spec_abspath)"
 mkdir -p "${TMP_DIR}/edge-cd/service-managers/fake-svc"
 echo "commands:
   restart:
@@ -173,7 +181,7 @@ logInfo "Running Task 26: Test enable_service"
 
 # Test Case 26.1: Enable a service using fake-svc
 echo "serviceManager:
-  name: fake-svc" > "${CONFIG_PATH}"
+  name: fake-svc" > "$(get_config_spec_abspath)"
 mkdir -p "${TMP_DIR}/edge-cd/service-managers/fake-svc"
 echo "commands:
   enable:

@@ -29,7 +29,18 @@ SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
 declare -ga BACKUP_EXTRA_ENVS
 
 function get_config_spec_abspath() {
-	echo "${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_PATH}/${CONFIG_SPEC_FILE}"
+	# Use defaults if variables are not set
+	local repo_path="${CONFIG_REPO_DESTINATION_PATH:-${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}}"
+	local config_path="${CONFIG_PATH}"  # Required - no default
+	local spec_file="${CONFIG_SPEC_FILE:-${__DEFAULT_CONFIG_SPEC_FILE}}"
+
+	# CONFIG_PATH is required
+	if [[ -z "${config_path}" ]]; then
+		echo "[ERROR] CONFIG_PATH must be set" >&2
+		exit 1
+	fi
+
+	echo "${repo_path}/${config_path}/${spec_file}"
 }
 
 function set_extra_envs() {
@@ -111,12 +122,12 @@ function read_yaml_file_optional() {
 
 function read_config() {
 	local yamlPath="${1}"
-	read_yaml_file "${yamlPath}" "${CONFIG_PATH}"
+	read_yaml_file "${yamlPath}" "$(get_config_spec_abspath)"
 }
 
 function read_config_optional() {
 	local yamlPath="${1}"
-	read_yaml_file_optional "${yamlPath}" "${CONFIG_PATH}"
+	read_yaml_file_optional "${yamlPath}" "$(get_config_spec_abspath)"
 }
 
 # -- reads config in the following order of precedence:

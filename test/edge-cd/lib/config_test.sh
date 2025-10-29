@@ -22,9 +22,19 @@ TMP_DIR=$(mktemp -d)
 # Copy the entire edge-cd directory to the temporary location
 cp -R "$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")")")/cmd/edge-cd" "${TMP_DIR}/edge-cd"
 
-# Set CONFIG_PATH to a temporary config file within the test environment
-# This is not strictly needed for read_yaml_stdin but good practice for config tests
-export CONFIG_PATH="${TMP_DIR}/edge-cd/config.yaml"
+# Set up config path variables for testing
+# CONFIG_PATH is the relative directory path within the config repo
+export CONFIG_PATH="."
+# CONFIG_REPO_DESTINATION_PATH is where the config repo is located
+export CONFIG_REPO_DESTINATION_PATH="${TMP_DIR}/edge-cd"
+# CONFIG_SPEC_FILE is the name of the spec file
+export CONFIG_SPEC_FILE="config.yaml"
+# The actual config file will be at: ${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_PATH}/${CONFIG_SPEC_FILE}
+# Which resolves to: ${TMP_DIR}/edge-cd/./config.yaml
+
+# Set default values that would normally come from edge-cd script
+export __DEFAULT_CONFIG_REPO_DESTINATION_PATH="/usr/local/src/edge-cd-config"
+export __DEFAULT_CONFIG_SPEC_FILE="spec.yaml"
 
 # Clean up on exit
 trap 'rm -rf "${TMP_DIR}"' EXIT
@@ -165,7 +175,7 @@ logInfo "Running tests for read_config"
 
 # Create a temporary config.yaml for testing
 
-cat <<EOF > "${CONFIG_PATH}"
+cat <<EOF > "$(get_config_spec_abspath)"
 
 app:
 
@@ -230,7 +240,7 @@ logInfo "All read_yaml_file_optional tests completed."
 logInfo "Running tests for read_config_optional"
 
 # Create a temporary config.yaml for testing
-cat <<EOF > "${CONFIG_PATH}"
+cat <<EOF > "$(get_config_spec_abspath)"
 optional_app:
   name: optional-edge-cd-app
 EOF
@@ -252,7 +262,7 @@ logInfo "Running tests for read_value"
 
 # Test 5.1: Env Var set, Config set, Default provided.
 export TEST_VAR_5_1="env_value_5_1"
-cat <<EOF > "${CONFIG_PATH}"
+cat <<EOF > "$(get_config_spec_abspath)"
 key_5_1: config_value_5_1
 EOF
 EXPECTED="env_value_5_1"
@@ -261,7 +271,7 @@ assert_equals "${EXPECTED}" "${ACTUAL}" "read_value should prioritize Env Var (5
 unset TEST_VAR_5_1
 
 # Test 5.2: Env Var unset, Config set, Default provided.
-cat <<EOF > "${CONFIG_PATH}"
+cat <<EOF > "$(get_config_spec_abspath)"
 key_5_2: config_value_5_2
 EOF
 EXPECTED="config_value_5_2"
@@ -269,13 +279,13 @@ ACTUAL=$(read_value TEST_VAR_5_2 ".key_5_2" "default_value_5_2")
 assert_equals "${EXPECTED}" "${ACTUAL}" "read_value should prioritize Config (5.2)"
 
 # Test 5.3: Env Var unset, Config unset, Default provided.
-rm "${CONFIG_PATH}"
+rm "$(get_config_spec_abspath)"
 EXPECTED="default_value_5_3"
 ACTUAL=$(read_value TEST_VAR_5_3 ".key_5_3" "default_value_5_3")
 assert_equals "${EXPECTED}" "${ACTUAL}" "read_value should use Default (5.3)"
 
 # Test 5.4: Env Var unset, Config unset, Default unset (should exit 1).
-rm -f "${CONFIG_PATH}"
+rm -f "$(get_config_spec_abspath)"
 # Run read_value in a subshell and capture its exit code
 if (read_value TEST_VAR_5_4 ".key_5_4") 2>/dev/null; then
     logErr "FAIL: read_value should exit 1 if no value found (5.4) - Expected error, but command succeeded."
@@ -290,7 +300,7 @@ fi
 
 # Test 5.5: Env Var "null", Config set, Default provided.
 export TEST_VAR_5_5="null"
-cat <<EOF > "${CONFIG_PATH}"
+cat <<EOF > "$(get_config_spec_abspath)"
 key_5_5: config_value_5_5
 EOF
 EXPECTED="config_value_5_5"
@@ -299,7 +309,7 @@ assert_equals "${EXPECTED}" "${ACTUAL}" "read_value should treat Env Var \"null\
 unset TEST_VAR_5_5
 
 # Test 5.6: Env Var unset, Config "null", Default provided.
-cat <<EOF > "${CONFIG_PATH}"
+cat <<EOF > "$(get_config_spec_abspath)"
 key_5_6: null
 EOF
 EXPECTED="default_value_5_6"
@@ -313,7 +323,7 @@ logInfo "Running Task 6: Test set_extra_envs and reset_extra_envs"
 
 # Test Case 6.1: Variable initially unset.
 unset MY_VAR
-cat <<EOF > "${CONFIG_PATH}"
+cat <<EOF > "$(get_config_spec_abspath)"
 extraEnvs:
   - MY_VAR: new_value
 EOF
@@ -330,7 +340,7 @@ fi
 
 # Test Case 6.2: Variable initially set.
 export MY_VAR="original_value"
-cat <<EOF > "${CONFIG_PATH}"
+cat <<EOF > "$(get_config_spec_abspath)"
 extraEnvs:
   - MY_VAR: new_value
 EOF
@@ -342,7 +352,7 @@ assert_equals "original_value" "${MY_VAR}" "reset_extra_envs: variable restored 
 # Test Case 6.3: Multiple variables.
 unset MY_VAR1
 export MY_VAR2="original_value2"
-cat <<EOF > "${CONFIG_PATH}"
+cat <<EOF > "$(get_config_spec_abspath)"
 extraEnvs:
   - MY_VAR1: new_value1
   - MY_VAR2: new_value2

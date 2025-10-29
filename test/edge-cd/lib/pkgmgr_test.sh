@@ -12,8 +12,16 @@ SRC_DIR="$(dirname "${BASH_SOURCE[0]}")/../../.."
 TMP_DIR=$(mktemp -d)
 cp -R "${SRC_DIR}/cmd/edge-cd" "${TMP_DIR}/edge-cd"
 
-# Set CONFIG_PATH to a temporary config file within the test environment
-export CONFIG_PATH="${TMP_DIR}/edge-cd/config.yaml"
+# Set up config path variables for testing
+# CONFIG_PATH is the relative directory path within the config repo
+export CONFIG_PATH="."
+# CONFIG_REPO_DESTINATION_PATH is where the config repo is located
+export CONFIG_REPO_DESTINATION_PATH="${TMP_DIR}/edge-cd"
+# CONFIG_SPEC_FILE is the name of the spec file
+export CONFIG_SPEC_FILE="config.yaml"
+# Set default values that would normally come from edge-cd script
+export __DEFAULT_CONFIG_REPO_DESTINATION_PATH="/usr/local/src/edge-cd-config"
+export __DEFAULT_CONFIG_SPEC_FILE="spec.yaml"
 
 # Set SRC_DIR for sourced scripts to use the temporary directory
 export SRC_DIR="${TMP_DIR}/edge-cd"
@@ -108,7 +116,7 @@ logInfo "Running Task 15: Test __get_package_manager_config (Valid Manager)"
 
 # Test Case 15.1: Valid package manager (opkg)
 echo "packageManager:
-  name: opkg" > "${CONFIG_PATH}"
+  name: opkg" > "$(get_config_spec_abspath)"
 
 mkdir -p "${TMP_DIR}/edge-cd/package-managers"
 echo "update: ["echo", "opkg", "update"]
@@ -130,7 +138,7 @@ logInfo "Running Task 16: Test __get_package_manager_config (Invalid Manager)"
 
 # Test Case 16.1: Non-existent package manager
 echo "packageManager:
-  name: nonexistent-pkg" > "${CONFIG_PATH}"
+  name: nonexistent-pkg" > "$(get_config_spec_abspath)"
 
 assert_stderr_contains "[ERROR] Package manager \"nonexistent-pkg\" cannot be found" "__get_package_manager_config" "exits with error for non-existent manager"
 assert_exit_code 1 "__get_package_manager_config" "exits with status 1 for non-existent manager"
@@ -142,7 +150,7 @@ logInfo "Running Task 17: Test __get_package_manager_config (CUSTOM Manager)"
 
 # Test Case 17.1: CUSTOM package manager
 echo "packageManager:
-  name: CUSTOM" > "${CONFIG_PATH}"
+  name: CUSTOM" > "$(get_config_spec_abspath)"
 
 assert_stderr_contains "Not implemented yet" "__get_package_manager_config" "exits with error for CUSTOM manager"
 assert_exit_code 1 "__get_package_manager_config" "exits with status 1 for CUSTOM manager"
@@ -156,7 +164,7 @@ logInfo "Running Task 18: Test reconcile_package_auto_upgrade (Auto-upgrade Enab
 echo "packageManager:
   name: fake-pkg
   autoUpgrade: true
-  requiredPackages: [\"pkg1\", \"pkg2\"]" > "${CONFIG_PATH}"
+  requiredPackages: [\"pkg1\", \"pkg2\"]" > "$(get_config_spec_abspath)"
 
 # Create a fake package manager config that echoes its commands
 mkdir -p "${TMP_DIR}/edge-cd/package-managers"
@@ -180,7 +188,7 @@ logInfo "Running Task 19: Test reconcile_package_auto_upgrade (Auto-upgrade Disa
 echo "packageManager:
   name: fake-pkg
   autoUpgrade: false
-  requiredPackages: [\"pkg1\", \"pkg2\"]" > "${CONFIG_PATH}"
+  requiredPackages: [\"pkg1\", \"pkg2\"]" > "$(get_config_spec_abspath)"
 
 # Capture stdout/stderr
 output=$(reconcile_package_auto_upgrade 2>&1 >/dev/null)
@@ -195,7 +203,7 @@ logInfo "Running Task 20: Test reconcile_packages (Packages to Install)"
 # Test Case 20.1: Packages to install
 echo "packageManager:
   name: fake-pkg
-  requiredPackages: [\"pkgA\", \"pkgB\"]" > "${CONFIG_PATH}"
+  requiredPackages: [\"pkgA\", \"pkgB\"]" > "$(get_config_spec_abspath)"
 
 # Create a fake package manager config that echoes its commands
 echo "update:
@@ -219,7 +227,7 @@ logInfo "Running Task 21: Test reconcile_packages (No Packages to Install)"
 # Test Case 21.1: No packages to install (empty list)
 echo "packageManager:
   name: fake-pkg
-  requiredPackages: []" > "${CONFIG_PATH}"
+  requiredPackages: []" > "$(get_config_spec_abspath)"
 
 # Capture stdout/stderr
 output=$(reconcile_packages 2>&1)
@@ -229,7 +237,7 @@ assert_empty "$(echo "${output}" | grep -v "No package to install")" "reconcile_
 
 # Test Case 21.2: No packages to install (missing section)
 echo "packageManager:
-  name: fake-pkg" > "${CONFIG_PATH}"
+  name: fake-pkg" > "$(get_config_spec_abspath)"
 
 output=$(reconcile_packages 2>&1)
 

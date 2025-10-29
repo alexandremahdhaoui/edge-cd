@@ -55,7 +55,7 @@ function __get_package_manager_config() {
 
 function reconcile_package_auto_upgrade() {
 	local autoUpgrade
-	autoUpgrade="$(yq -e '.packageManager.autoUpgrade' "${CONFIG_PATH}" 2>/dev/null || echo "false")"
+	autoUpgrade="$(yq -e '.packageManager.autoUpgrade' "$(get_config_spec_abspath)" 2>/dev/null || echo "false")"
 	if [[ "${autoUpgrade}" != "true" ]]; then
 		return 0
 	fi
@@ -72,7 +72,7 @@ function reconcile_package_auto_upgrade() {
 	"${update[@]}"
 
 	local packages
-	packages="$(yq -e '.packageManager.requiredPackages[]' "${CONFIG_PATH}" || echo "")"
+	packages="$(yq -e '.packageManager.requiredPackages[]' "$(get_config_spec_abspath)" || echo "")"
 	local -a packageArray
 	readarray -t packageArray <<<"${packages}"
 
@@ -81,7 +81,7 @@ function reconcile_package_auto_upgrade() {
 
 function reconcile_packages() {
 	local packages
-	packages="$(yq -e '.packageManager.requiredPackages[]' "${CONFIG_PATH}" 2>/dev/null || echo "")"
+	packages="$(yq -e '.packageManager.requiredPackages[]' "$(get_config_spec_abspath)" 2>/dev/null || echo "")"
 	[ "${packages}" == "" ] \
 		&& logInfo "No package to install" \
 		&& return

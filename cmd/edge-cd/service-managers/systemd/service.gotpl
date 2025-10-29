@@ -28,6 +28,27 @@ Group={{ .Group }}
 {{- if .ConfigPath }}
 Environment=CONFIG_PATH={{ .ConfigPath }}
 {{- end }}
+{{- if .ConfigSpecFile }}
+Environment=CONFIG_SPEC_FILE={{ .ConfigSpecFile }}
+{{- end }}
+{{- if .ConfigRepoBranch }}
+Environment=CONFIG_REPO_BRANCH={{ .ConfigRepoBranch }}
+{{- end }}
+{{- if .ConfigRepoDestinationPath }}
+Environment=CONFIG_REPO_DESTINATION_PATH={{ .ConfigRepoDestinationPath }}
+{{- end }}
+{{- if .ConfigRepoURL }}
+Environment=CONFIG_REPO_URL={{ .ConfigRepoURL }}
+{{- end }}
+{{- if .EdgeCDRepoBranch }}
+Environment=EDGE_CD_REPO_BRANCH={{ .EdgeCDRepoBranch }}
+{{- end }}
+{{- if .EdgeCDRepoDestinationPath }}
+Environment=EDGE_CD_REPO_DESTINATION_PATH={{ .EdgeCDRepoDestinationPath }}
+{{- end }}
+{{- if .EdgeCDRepoURL }}
+Environment=EDGE_CD_REPO_URL={{ .EdgeCDRepoURL }}
+{{- end }}
 {{- range .EnvironmentVars }}
 Environment={{.Key}}={{.Value}}
 {{- end }}

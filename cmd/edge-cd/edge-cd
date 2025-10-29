@@ -58,6 +58,7 @@ __DEFAULT_CONFIG_SPEC_FILE=spec.yaml
 
 function declare_config() {
 	# -- declare vars
+	declare CONFIG_PATH
 	declare CONFIG_SPEC_FILE
 	declare CONFIG_REPO_BRANCH
 	declare CONFIG_REPO_DESTINATION_PATH
@@ -71,6 +72,7 @@ function declare_config() {
 	declare CONFIG_COMMIT_PATH
 
 	# -- declare backup vars
+	declare __BACKUP_CONFIG_PATH
 	declare __BACKUP_CONFIG_SPEC_FILE
 	declare __BACKUP_CONFIG_REPO_DESTINATION_PATH
 	declare __BACKUP_CONFIG_REPO_URL
@@ -84,9 +86,22 @@ function declare_config() {
 }
 
 function init_config() {
+	# First, initialize the critical variables needed for get_config_spec_abspath()
+	# These need to be set before set_extra_envs() is called
+	CONFIG_SPEC_FILE="${CONFIG_SPEC_FILE:-${__DEFAULT_CONFIG_SPEC_FILE}}"
+	CONFIG_REPO_DESTINATION_PATH="${CONFIG_REPO_DESTINATION_PATH:-${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}}"
+
+	# CONFIG_PATH must be provided - no default
+	if [[ -z "${CONFIG_PATH}" ]]; then
+		echo "[ERROR] CONFIG_PATH environment variable must be set" >&2
+		exit 1
+	fi
+
+	# Now we can safely call set_extra_envs since the path variables are initialized
 	set_extra_envs
 
 	# -- user config
+	__BACKUP_CONFIG_PATH="${CONFIG_PATH}"
 	__BACKUP_CONFIG_SPEC_FILE="$(read_value CONFIG_SPEC_FILE '.config.spec' "${__DEFAULT_CONFIG_SPEC_FILE}")"
 	__BACKUP_CONFIG_REPO_BRANCH="$(read_value CONFIG_REPO_BRANCH '.config.repo.branch' "${__DEFAULT_CONFIG_REPO_BRANCH}")"
 	__BACKUP_CONFIG_REPO_DESTINATION_PATH="$(read_value CONFIG_REPO_DESTINATION_PATH '.config.repo.destPath' "${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}")"
@@ -104,6 +119,7 @@ function init_config() {
 function reset_config() {
 	reset_extra_envs
 
+	CONFIG_PATH="${__BACKUP_CONFIG_PATH}"
 	CONFIG_SPEC_FILE="${__BACKUP_CONFIG_SPEC_FILE}"
 
 	CONFIG_REPO_BRANCH="${__BACKUP_CONFIG_REPO_BRANCH}"
@@ -169,7 +185,8 @@ function clone_repo_config() {
 	git clone --filter=blob:none --no-checkout "${CONFIG_REPO_URL}" "${CONFIG_REPO_DESTINATION_PATH}"
 
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout init
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_SPEC_FILE_FILE}"
+	# Set sparse-checkout to include the config path directory
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" checkout "${CONFIG_REPO_BRANCH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" pull
@@ -181,7 +198,8 @@ function sync_repo_config() {
 		return 0
 	fi
 	logInfo "Pulling config repo"
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_SPEC_FILE_FILE}"
+	# Set sparse-checkout to include the config path directory
+	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
 	git -C "${CONFIG_REPO_DESTINATION_PATH}" reset --hard FETCH_HEAD
 }
@@ -221,6 +239,7 @@ function __reconcile_file() {
 	fi
 
 	logInfo "Drift detected: updating file \"${destPath}\""
+	mkdir -p "$(dirname "${destPath}")"
 	# mark associated service for restart
 	local service
 	local -a servicesToRestart
@@ -269,12 +288,12 @@ function __reconcile_file_mux() {
 	# TODO: Add a "git" type? E.g.: clone any repo and copy file from repo to the dest
 	case "${type}" in
 		file)
-			srcPath="${CONFIG_REPO_DESTINATION_PATH}/${srcPath}"
+			srcPath="${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_PATH}/${srcPath}"
 			;;
 
 		# -- directory does not support recursive
 		directory)
-			find "${srcPath}" -type f ! -name '\.*' | while IFS= read -r srcPath; do
+			find "${srcPath}" -type f ! -name '\.*' -exec readlink -f {} \; | while IFS= read -r srcPath; do
 				__reconcile_file "${srcPath}" "${destPath}" "${fileMod}" "${restartServices}" "${requireReboot}"
 			done
 			# -- directory returns early
@@ -305,7 +324,7 @@ function reconcile_files() {
 	logInfo "Reconciling files"
 
 	local -a files
-	readarray files < <(yq e -o=j -I=0 '.files[]' "${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_SPEC_FILE}")
+	readarray files < <(yq e -o=j -I=0 '.files[]' "$(get_config_spec_abspath)")
 
 	local fileSpec
 	for fileSpec in "${files[@]}"; do

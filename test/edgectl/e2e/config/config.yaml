@@ -29,4 +29,10 @@ packageManager:
     - curl
   autoUpgrade: false
 
-files: []
+files:
+  - type: file
+    srcPath: files/quagga_bgpd.conf
+    destPath: /etc/quagga/bgpd.conf
+  - type: file
+    srcPath: files/quagga_zebra.conf
+    destPath: /etc/quagga/zebra.conf
