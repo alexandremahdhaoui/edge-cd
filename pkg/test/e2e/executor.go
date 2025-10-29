@@ -12,6 +12,7 @@ import (
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/userconfig"
 	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
 	"sigs.k8s.io/yaml"
 )
@@ -199,14 +200,6 @@ func ExecuteBootstrapTest(
 	return nil
 }
 
-// EdgeCDSpec represents the structure of edge-cd config.yaml
-type EdgeCDSpec struct {
-	Files []struct {
-		SrcPath  string `yaml:"srcPath"`
-		DestPath string `yaml:"destPath"`
-	} `yaml:"files"`
-}
-
 // waitForFiles polls for a file to exist on the target VM, up to maxWait duration
 func waitForFiles(
 	ctx execcontext.Context,
@@ -344,7 +337,7 @@ func verifyBootstrapResults(
 	}
 
 	// Parse spec to extract files list
-	var spec EdgeCDSpec
+	var spec userconfig.Spec
 	if err := yaml.Unmarshal([]byte(configContent), &spec); err != nil {
 		errors = append(errors, flaterrors.Join(err, errParseConfig))
 		return errors

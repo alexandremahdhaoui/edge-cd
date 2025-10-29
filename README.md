@@ -151,7 +151,7 @@ Here is an example of a `config.yaml` file:
 
 ```yaml
 # -- defines how EdgeCD clone itself
-edgectl:
+edgeCD:
   autoUpdate:
     enabled: true
   repo:
@@ -165,7 +165,7 @@ config:
   repo:
     url: "<your-config-repo-url>"
     branch: "main"
-    destinationPath: "/usr/local/src/deployment"
+    destPath: "/usr/local/src/deployment"
 
 pollingIntervalSecond: 60
 

@@ -36,8 +36,8 @@ start_service() {
   {{- if .ConfigRepoBranch }}
   procd_set_param env CONFIG_REPO_BRANCH={{ .ConfigRepoBranch }}
   {{- end }}
-  {{- if .ConfigRepoDestinationPath }}
-  procd_set_param env CONFIG_REPO_DESTINATION_PATH={{ .ConfigRepoDestinationPath }}
+  {{- if .ConfigRepoDestPath }}
+  procd_set_param env CONFIG_REPO_DEST_PATH={{ .ConfigRepoDestPath }}
   {{- end }}
   {{- if .ConfigRepoURL }}
   procd_set_param env CONFIG_REPO_URL={{ .ConfigRepoURL }}
@@ -45,8 +45,8 @@ start_service() {
   {{- if .EdgeCDRepoBranch }}
   procd_set_param env EDGE_CD_REPO_BRANCH={{ .EdgeCDRepoBranch }}
   {{- end }}
-  {{- if .EdgeCDRepoDestinationPath }}
-  procd_set_param env EDGE_CD_REPO_DESTINATION_PATH={{ .EdgeCDRepoDestinationPath }}
+  {{- if .EdgeCDRepoDestPath }}
+  procd_set_param env EDGE_CD_REPO_DEST_PATH={{ .EdgeCDRepoDestPath }}
   {{- end }}
   {{- if .EdgeCDRepoURL }}
   procd_set_param env EDGE_CD_REPO_URL={{ .EdgeCDRepoURL }}

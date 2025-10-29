@@ -30,7 +30,7 @@ declare -ga BACKUP_EXTRA_ENVS
 
 function get_config_spec_abspath() {
 	# Use defaults if variables are not set
-	local repo_path="${CONFIG_REPO_DESTINATION_PATH:-${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}}"
+	local repo_path="${CONFIG_REPO_DEST_PATH:-${__DEFAULT_CONFIG_REPO_DEST_PATH}}"
 	local config_path="${CONFIG_PATH}"  # Required - no default
 	local spec_file="${CONFIG_SPEC_FILE:-${__DEFAULT_CONFIG_SPEC_FILE}}"
 

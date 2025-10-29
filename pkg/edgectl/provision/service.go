@@ -40,19 +40,19 @@ type ServiceManagerConfig struct {
 
 // ServiceTemplateData holds the data for rendering service file templates
 type ServiceTemplateData struct {
-	EdgeCDScriptPath            string
-	ConfigPath                  string
-	ConfigSpecFile              string
-	ConfigRepoBranch            string
-	ConfigRepoDestinationPath   string
-	ConfigRepoURL               string
-	EdgeCDRepoBranch            string
-	EdgeCDRepoDestinationPath   string
-	EdgeCDRepoURL               string
-	User                        string
-	Group                       string
-	EnvironmentVars             []EnvVar
-	Args                        []string
+	EdgeCDScriptPath   string
+	ConfigPath         string
+	ConfigSpecFile     string
+	ConfigRepoBranch   string
+	ConfigRepoDestPath string
+	ConfigRepoURL      string
+	EdgeCDRepoBranch   string
+	EdgeCDRepoDestPath string
+	EdgeCDRepoURL      string
+	User               string
+	Group              string
+	EnvironmentVars    []EnvVar
+	Args               []string
 }
 
 // EnvVar represents an environment variable key-value pair

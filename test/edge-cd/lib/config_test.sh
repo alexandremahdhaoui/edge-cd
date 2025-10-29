@@ -25,15 +25,15 @@ cp -R "$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[
 # Set up config path variables for testing
 # CONFIG_PATH is the relative directory path within the config repo
 export CONFIG_PATH="."
-# CONFIG_REPO_DESTINATION_PATH is where the config repo is located
-export CONFIG_REPO_DESTINATION_PATH="${TMP_DIR}/edge-cd"
+# CONFIG_REPO_DEST_PATH is where the config repo is located
+export CONFIG_REPO_DEST_PATH="${TMP_DIR}/edge-cd"
 # CONFIG_SPEC_FILE is the name of the spec file
 export CONFIG_SPEC_FILE="config.yaml"
-# The actual config file will be at: ${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_PATH}/${CONFIG_SPEC_FILE}
+# The actual config file will be at: ${CONFIG_REPO_DEST_PATH}/${CONFIG_PATH}/${CONFIG_SPEC_FILE}
 # Which resolves to: ${TMP_DIR}/edge-cd/./config.yaml
 
 # Set default values that would normally come from edge-cd script
-export __DEFAULT_CONFIG_REPO_DESTINATION_PATH="/usr/local/src/edge-cd-config"
+export __DEFAULT_CONFIG_REPO_DEST_PATH="/usr/local/src/edge-cd-config"
 export __DEFAULT_CONFIG_SPEC_FILE="spec.yaml"
 
 # Clean up on exit

@@ -293,19 +293,19 @@ func main() {
 		// Build service template data
 		// These environment variables will be passed to edge-cd when it runs as a service
 		serviceTemplateData := provision.ServiceTemplateData{
-			EdgeCDScriptPath:          filepath.Join(remoteEdgeCDRepoDestPath, "cmd/edge-cd/edge-cd"),
-			ConfigPath:                *configPath,               // Relative directory path within config repo
-			ConfigSpecFile:            *configSpec,               // Config spec filename
-			ConfigRepoBranch:          *configBranch,             // Config repo branch
-			ConfigRepoDestinationPath: *userConfigRepoDestPath,   // Where config repo is cloned on target
-			ConfigRepoURL:             *configRepo,               // Config repo URL
-			EdgeCDRepoBranch:          *edgeCDBranch,             // EdgeCD repo branch
-			EdgeCDRepoDestinationPath: *edgeCDRepoDestPath,       // Where edge-cd repo is cloned on target
-			EdgeCDRepoURL:             *edgeCDRepo,               // EdgeCD repo URL
-			User:                      "",                        // Optional: will be omitted if empty
-			Group:                     "",                        // Optional: will be omitted if empty
-			EnvironmentVars:           []provision.EnvVar{},      // Optional: can be extended later
-			Args:                      []string{},                // Optional: can be extended later
+			EdgeCDScriptPath:   filepath.Join(remoteEdgeCDRepoDestPath, "cmd/edge-cd/edge-cd"),
+			ConfigPath:         *configPath,             // Relative directory path within config repo
+			ConfigSpecFile:     *configSpec,             // Config spec filename
+			ConfigRepoBranch:   *configBranch,           // Config repo branch
+			ConfigRepoDestPath: *userConfigRepoDestPath, // Where config repo is cloned on target
+			ConfigRepoURL:      *configRepo,             // Config repo URL
+			EdgeCDRepoBranch:   *edgeCDBranch,           // EdgeCD repo branch
+			EdgeCDRepoDestPath: *edgeCDRepoDestPath,     // Where edge-cd repo is cloned on target
+			EdgeCDRepoURL:      *edgeCDRepo,             // EdgeCD repo URL
+			User:               "",                      // Optional: will be omitted if empty
+			Group:              "",                      // Optional: will be omitted if empty
+			EnvironmentVars:    []provision.EnvVar{},    // Optional: can be extended later
+			Args:               []string{},              // Optional: can be extended later
 		}
 
 		// Service Setup

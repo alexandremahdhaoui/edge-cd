@@ -1,2 +1,10 @@
 - edgectl bootstrap must be idempotent: |
     If `edgectl-e2e run <test-id>` passes once, it should pass twice (and more)
+- spec: |
+    fix the discrepancies in this repo regarding the spec file data structure.
+    The authoritative source is information from @cmd/edge-cd/.
+    The goal is:
+    - To create a spec pkg under ./pkg/spec that reflect the data structure described in @cmd/edge-cd/.
+      All tools such as edgectl or edgectl-e2e must use the spec struct defined in ./pkg/spec/spec.go (which data structures comes from @cmd/edge-cd/ as an authoritative source).
+    - Fix all documentation, spec.yaml/config.yaml so they comply to the authoritative source
+

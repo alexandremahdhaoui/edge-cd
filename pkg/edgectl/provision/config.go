@@ -11,6 +11,7 @@ import (
 
 	"github.com/alexandremahdhaoui/edge-cd/pkg/execcontext"
 	"github.com/alexandremahdhaoui/edge-cd/pkg/ssh"
+	"github.com/alexandremahdhaoui/edge-cd/pkg/userconfig"
 	"github.com/alexandremahdhaoui/tooling/pkg/flaterrors"
 	"sigs.k8s.io/yaml"
 )
@@ -26,7 +27,7 @@ var (
 
 const configTemplate = `
 # -- defines how EdgeCD clone itself
-edgectl:
+edgeCD:
   autoUpdate:
     enabled: true
   repo:
@@ -40,7 +41,7 @@ config:
   repo:
     url: "{{ .ConfigRepoURL }}"
     branch: "main" # Assuming default branch for now
-    destinationPath: "/usr/local/src/deployment" # Assuming default path for now
+    destPath: "/usr/local/src/deployment" # Assuming default path for now
 
 pollingIntervalSecond: 60
 
@@ -128,28 +129,20 @@ func ReadLocalConfig(configPath, configSpec string) (string, error) {
 // ReplaceRepoURLsInConfig replaces the repository URLs in a config YAML string.
 // This is used when a static config file is provided but dynamic repo URLs need to be injected.
 func ReplaceRepoURLsInConfig(configContent, edgeCDRepoURL, configRepoURL string) (string, error) {
-	// Parse the YAML into a generic map
-	var config map[string]interface{}
+	// Parse the YAML into the userconfig struct
+	var config userconfig.Spec
 	if err := yaml.Unmarshal([]byte(configContent), &config); err != nil {
 		return "", flaterrors.Join(err, errUnmarshalConfig)
 	}
 
 	// Replace edgeCD repo URL if provided
 	if edgeCDRepoURL != "" {
-		if edgeCD, ok := config["edgeCD"].(map[string]interface{}); ok {
-			if repo, ok := edgeCD["repo"].(map[string]interface{}); ok {
-				repo["url"] = edgeCDRepoURL
-			}
-		}
+		config.EdgeCD.Repo.URL = edgeCDRepoURL
 	}
 
 	// Replace config repo URL if provided
 	if configRepoURL != "" {
-		if configSection, ok := config["config"].(map[string]interface{}); ok {
-			if repo, ok := configSection["repo"].(map[string]interface{}); ok {
-				repo["url"] = configRepoURL
-			}
-		}
+		config.Config.Repo.URL = configRepoURL
 	}
 
 	// Marshal back to YAML

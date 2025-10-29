@@ -53,7 +53,7 @@ __DEFAULT_EDGE_CD_COMMIT_PATH=/tmp/edge-cd/edge-cd-last-synchronized-commit.txt
 __DEFAULT_CONFIG_COMMIT_PATH=/tmp/edge-cd/config-last-synchronized-commit.txt
 
 __DEFAULT_CONFIG_REPO_BRANCH=main
-__DEFAULT_CONFIG_REPO_DESTINATION_PATH=/usr/local/src/edge-cd-config
+__DEFAULT_CONFIG_REPO_DEST_PATH=/usr/local/src/edge-cd-config
 __DEFAULT_CONFIG_SPEC_FILE=spec.yaml
 
 function declare_config() {
@@ -61,7 +61,7 @@ function declare_config() {
 	declare CONFIG_PATH
 	declare CONFIG_SPEC_FILE
 	declare CONFIG_REPO_BRANCH
-	declare CONFIG_REPO_DESTINATION_PATH
+	declare CONFIG_REPO_DEST_PATH
 	declare CONFIG_REPO_URL
 
 	declare EDGE_CD_REPO_BRANCH
@@ -74,7 +74,7 @@ function declare_config() {
 	# -- declare backup vars
 	declare __BACKUP_CONFIG_PATH
 	declare __BACKUP_CONFIG_SPEC_FILE
-	declare __BACKUP_CONFIG_REPO_DESTINATION_PATH
+	declare __BACKUP_CONFIG_REPO_DEST_PATH
 	declare __BACKUP_CONFIG_REPO_URL
 
 	declare __BACKUP_EDGE_CD_REPO_BRANCH
@@ -89,7 +89,7 @@ function init_config() {
 	# First, initialize the critical variables needed for get_config_spec_abspath()
 	# These need to be set before set_extra_envs() is called
 	CONFIG_SPEC_FILE="${CONFIG_SPEC_FILE:-${__DEFAULT_CONFIG_SPEC_FILE}}"
-	CONFIG_REPO_DESTINATION_PATH="${CONFIG_REPO_DESTINATION_PATH:-${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}}"
+	CONFIG_REPO_DEST_PATH="${CONFIG_REPO_DEST_PATH:-${__DEFAULT_CONFIG_REPO_DEST_PATH}}"
 
 	# CONFIG_PATH must be provided - no default
 	if [[ -z "${CONFIG_PATH}" ]]; then
@@ -104,7 +104,7 @@ function init_config() {
 	__BACKUP_CONFIG_PATH="${CONFIG_PATH}"
 	__BACKUP_CONFIG_SPEC_FILE="$(read_value CONFIG_SPEC_FILE '.config.spec' "${__DEFAULT_CONFIG_SPEC_FILE}")"
 	__BACKUP_CONFIG_REPO_BRANCH="$(read_value CONFIG_REPO_BRANCH '.config.repo.branch' "${__DEFAULT_CONFIG_REPO_BRANCH}")"
-	__BACKUP_CONFIG_REPO_DESTINATION_PATH="$(read_value CONFIG_REPO_DESTINATION_PATH '.config.repo.destPath' "${__DEFAULT_CONFIG_REPO_DESTINATION_PATH}")"
+	__BACKUP_CONFIG_REPO_DEST_PATH="$(read_value CONFIG_REPO_DEST_PATH '.config.repo.destPath' "${__DEFAULT_CONFIG_REPO_DEST_PATH}")"
 	__BACKUP_CONFIG_REPO_URL="$(read_value CONFIG_REPO_URL '.config.repo.url')"
 
 	# -- edge config
@@ -123,7 +123,7 @@ function reset_config() {
 	CONFIG_SPEC_FILE="${__BACKUP_CONFIG_SPEC_FILE}"
 
 	CONFIG_REPO_BRANCH="${__BACKUP_CONFIG_REPO_BRANCH}"
-	CONFIG_REPO_DESTINATION_PATH="${__BACKUP_CONFIG_REPO_DESTINATION_PATH}"
+	CONFIG_REPO_DEST_PATH="${__BACKUP_CONFIG_REPO_DEST_PATH}"
 	CONFIG_REPO_URL="${__BACKUP_CONFIG_REPO_URL}"
 
 	EDGE_CD_REPO_BRANCH="${__BACKUP_EDGE_CD_REPO_BRANCH}"
@@ -182,14 +182,14 @@ function clone_repo_config() {
 		return 0
 	fi
 	logInfo "Cloning config repo"
-	git clone --filter=blob:none --no-checkout "${CONFIG_REPO_URL}" "${CONFIG_REPO_DESTINATION_PATH}"
+	git clone --filter=blob:none --no-checkout "${CONFIG_REPO_URL}" "${CONFIG_REPO_DEST_PATH}"
 
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout init
+	git -C "${CONFIG_REPO_DEST_PATH}" sparse-checkout init
 	# Set sparse-checkout to include the config path directory
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" checkout "${CONFIG_REPO_BRANCH}"
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" pull
+	git -C "${CONFIG_REPO_DEST_PATH}" sparse-checkout set "${CONFIG_PATH}"
+	git -C "${CONFIG_REPO_DEST_PATH}" checkout "${CONFIG_REPO_BRANCH}"
+	git -C "${CONFIG_REPO_DEST_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
+	git -C "${CONFIG_REPO_DEST_PATH}" pull
 }
 
 function sync_repo_config() {
@@ -199,9 +199,9 @@ function sync_repo_config() {
 	fi
 	logInfo "Pulling config repo"
 	# Set sparse-checkout to include the config path directory
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" sparse-checkout set "${CONFIG_PATH}"
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
-	git -C "${CONFIG_REPO_DESTINATION_PATH}" reset --hard FETCH_HEAD
+	git -C "${CONFIG_REPO_DEST_PATH}" sparse-checkout set "${CONFIG_PATH}"
+	git -C "${CONFIG_REPO_DEST_PATH}" fetch origin "${CONFIG_REPO_BRANCH}"
+	git -C "${CONFIG_REPO_DEST_PATH}" reset --hard FETCH_HEAD
 }
 
 # ----------------------------------------------------------------
@@ -288,7 +288,7 @@ function __reconcile_file_mux() {
 	# TODO: Add a "git" type? E.g.: clone any repo and copy file from repo to the dest
 	case "${type}" in
 		file)
-			srcPath="${CONFIG_REPO_DESTINATION_PATH}/${CONFIG_PATH}/${srcPath}"
+			srcPath="${CONFIG_REPO_DEST_PATH}/${CONFIG_PATH}/${srcPath}"
 			;;
 
 		# -- directory does not support recursive
@@ -377,7 +377,7 @@ function is_commit_in_sync() {
 	fi
 	local currentCommit lastCommit
 	lastCommit=$(cat "${CONFIG_COMMIT_PATH}" 2>/dev/null || echo "")
-	currentCommit="$(git -C "${CONFIG_REPO_DESTINATION_PATH}" rev-parse HEAD)"
+	currentCommit="$(git -C "${CONFIG_REPO_DEST_PATH}" rev-parse HEAD)"
 
 	if [ "${lastCommit}" == "${currentCommit}" ]; then
 		logInfo "Skipping synchronization: user config is already in sync with commit ${currentCommit}"
@@ -389,7 +389,7 @@ function is_commit_in_sync() {
 
 function commit_last_change() {
 	local currentCommit
-	currentCommit="$(git -C "${CONFIG_REPO_DESTINATION_PATH}" rev-parse HEAD)"
+	currentCommit="$(git -C "${CONFIG_REPO_DEST_PATH}" rev-parse HEAD)"
 	echo "${currentCommit}" | tee &>/dev/null "${CONFIG_COMMIT_PATH}"
 	logInfo "Synced commit \"${currentCommit}\" successfully"
 }
@@ -418,7 +418,7 @@ function reconcile() {
 	[ -d "${EDGE_CD_REPO_DESTINATION_PATH}" ] || clone_repo_edge_cd
 	sync_repo_edge_cd
 
-	[ -d "${CONFIG_REPO_DESTINATION_PATH}" ] || clone_repo_config
+	[ -d "${CONFIG_REPO_DEST_PATH}" ] || clone_repo_config
 	sync_repo_config
 
 	# Check if the repository has been updated since the last

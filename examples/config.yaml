@@ -16,7 +16,7 @@ config:
   repo:
     url: git@github.com:alexandremahdhaoui/deployment.git
     branch: main
-    destinationPath: /usr/local/src/deployment
+    destPath: /usr/local/src/deployment
 
 pollingIntervalSecond: 60
 
