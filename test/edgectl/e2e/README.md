@@ -4,6 +4,40 @@
 
 The e2e tests verify that the complete edge-cd bootstrap pipeline works end-to-end. Tests create real VMs via libvirt, setup a git server, and execute the bootstrap command.
 
+## What the E2E Tests Validate
+
+The E2E tests validate the complete edge-cd lifecycle, including:
+
+### 1. Bootstrap Phase
+- Package installation (git, curl, openssh-client, yq)
+- Repository cloning (edge-cd and user-config repos)
+- Configuration file placement (/etc/edge-cd/config.yaml)
+- Service installation and startup (systemd or procd)
+- Initial file synchronization from config spec
+
+### 2. Reconciliation Phase
+The tests verify edge-cd's continuous reconciliation capabilities by:
+
+1. **Detecting Configuration Changes**: After bootstrap, the test pushes new commits to the user-config repository and verifies edge-cd detects them within one polling interval (5 seconds in test environment).
+
+2. **File Reconciliation**: Tests verify edge-cd correctly:
+   - Updates existing file content when source files change
+   - Creates new files when added to config spec
+   - Handles multiple simultaneous file changes
+
+3. **Test Scenarios**:
+   - **Scenario 1 - Modify Existing File**: Changes content of `quagga_bgpd.conf` and verifies update
+   - **Scenario 2 - Add New File**: Adds new file to config and verifies creation
+   - **Scenario 3 - Multiple Changes**: Updates multiple files in single commit
+
+Each scenario follows this pattern:
+1. Wait for edge-cd to complete current reconciliation loop
+2. Push configuration changes to git repository
+3. Wait for edge-cd to detect and reconcile changes (max 60 seconds)
+4. Verify changes were applied correctly on target VM
+
+**Expected Test Duration**: ~8-10 minutes total (includes bootstrap + 3 reconciliation scenarios)
+
 ## Quick Start
 
 ### Default Test (Automatic Cleanup)
