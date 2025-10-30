@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
 # Copyright 2025 Alexandre Mahdhaoui
 #
@@ -19,8 +19,8 @@
 # Preambule
 # ------------------------------------------------------------------#
 
-declare -g __LOADED_LIB_PKGMGR=true
-SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
+__LOADED_LIB_PKGMGR=true
+SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "$0")")}"
 LIB_DIR="${SRC_DIR}/lib"
 PKGMGR_DIR="${SRC_DIR}/package-managers"
 
@@ -35,11 +35,10 @@ PKGMGR_DIR="${SRC_DIR}/package-managers"
 # Preambule
 # ------------------------------------------------------------------#
 
-function __get_package_manager_config() {
-	local pkgManager configPath
+__get_package_manager_config() {
 	pkgManager="$(read_config '.packageManager.name')"
 
-	if [[ "${pkgManager}" == "CUSTOM" ]]; then
+	if [ "${pkgManager}" = "CUSTOM" ]; then
 		logErr "Not implemented yet"
 		exit 1
 	fi
@@ -53,53 +52,47 @@ function __get_package_manager_config() {
 	yq -e -r '.' "${configPath}"
 }
 
-function reconcile_package_auto_upgrade() {
-	local autoUpgrade
+reconcile_package_auto_upgrade() {
 	autoUpgrade="$(yq -e '.packageManager.autoUpgrade' "$(get_config_spec_abspath)" 2>/dev/null || echo "false")"
-	if [[ "${autoUpgrade}" != "true" ]]; then
+	if [ "${autoUpgrade}" != "true" ]; then
 		return 0
 	fi
 
 	logInfo "Upgrading packages"
 
-	local config
 	config="$(__get_package_manager_config)"
 
-	local -a update
-	local -a upgrade
-	readarray -t update < <(echo "${config}" | yq -e -r '.update[]')
-	readarray -t upgrade < <(echo "${config}" | yq -e -r '.upgrade[]')
-	"${update[@]}"
+	# Build update command from YAML array
+	update_cmd=$(echo "${config}" | yq -e -r '.update[]' | tr '\n' ' ')
+	eval "${update_cmd}"
 
-	local packages
-	packages="$(yq -e '.packageManager.requiredPackages[]' "$(get_config_spec_abspath)" || echo "")"
-	local -a packageArray
-	readarray -t packageArray <<<"${packages}"
+	# Get packages as space-separated list
+	packages="$(yq -e '.packageManager.requiredPackages[]' "$(get_config_spec_abspath)" 2>/dev/null | tr '\n' ' ' || echo "")"
 
-	"${upgrade[@]}" "${packageArray[@]}"
+	# Build upgrade command from YAML array
+	upgrade_cmd=$(echo "${config}" | yq -e -r '.upgrade[]' | tr '\n' ' ')
+
+	eval "${upgrade_cmd} ${packages}"
 }
 
-function reconcile_packages() {
-	local packages
-	packages="$(yq -e '.packageManager.requiredPackages[]' "$(get_config_spec_abspath)" 2>/dev/null || echo "")"
-	[ "${packages}" == "" ] \
-		&& logInfo "No package to install" \
-		&& return
+reconcile_packages() {
+	packages="$(yq -e '.packageManager.requiredPackages[]' "$(get_config_spec_abspath)" 2>/dev/null | tr '\n' ' ' || echo "")"
+	if [ -z "${packages}" ] || [ "${packages}" = " " ]; then
+		logInfo "No package to install"
+		return
+	fi
 
 	logInfo "Installing packages '${packages}'"
 
-	local -a packageArray
-	readarray -t packageArray <<<"${packages}"
-
-	local config
 	config="$(__get_package_manager_config)"
 
-	local -a install
-	local -a update
-	readarray -t install < <(echo "${config}" | yq -e -r '.install[]')
-	readarray -t update < <(echo "${config}" | yq -e -r '.update[]')
+	# Build install command from YAML array
+	install_cmd=$(echo "${config}" | yq -e -r '.install[]' | tr '\n' ' ')
 
-	"${update[@]}"
-	"${install[@]}" "${packageArray[@]}"
+	# Build update command from YAML array
+	update_cmd=$(echo "${config}" | yq -e -r '.update[]' | tr '\n' ' ')
+
+	eval "${update_cmd}"
+	eval "${install_cmd} ${packages}"
 }
 

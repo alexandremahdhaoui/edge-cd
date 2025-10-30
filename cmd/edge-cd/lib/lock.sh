@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
 # Copyright 2025 Alexandre Mahdhaoui
 #
@@ -19,31 +19,29 @@
 # Preambule
 # ------------------------------------------------------------------#
 
-declare -g __LOADED_LIB_LOCK=true
-SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
+__LOADED_LIB_LOCK=true
+SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "$0")")}"
 
 # ------------------------------------------------------------------#
 # Lock
 # ------------------------------------------------------------------#
 
-declare -g __DEFAULT_LOCK_FILE_DIRNAME="/tmp/edge-cd"
+__DEFAULT_LOCK_FILE_DIRNAME="/tmp/edge-cd"
 LOCK_FILE_DIRNAME="${LOCK_FILE_DIRNAME:-${__DEFAULT_LOCK_FILE_DIRNAME}}"
 
-function __get_lock_file_path() {
-	local LOCK_FILE_DIRNAME_LOCAL="${LOCK_FILE_DIRNAME:-/tmp/edge-cd}"
+__get_lock_file_path() {
+	LOCK_FILE_DIRNAME_LOCAL="${LOCK_FILE_DIRNAME:-/tmp/edge-cd}"
 	echo "${LOCK_FILE_DIRNAME_LOCAL}/edge-cd.lock"
 }
 
-function lock() {
-	local lockFilePath
+lock() {
 	lockFilePath="$(__get_lock_file_path)"
 
 	logInfo "Locking '${lockFilePath}'"
 	if [ -f "${lockFilePath}" ]; then
-		local lockPID
 		lockPID="$(cat "${lockFilePath}")"
 
-		if [ "${$}" == "$(cat "${lockFilePath}")" ]; then
+		if [ "$$" = "$(cat "${lockFilePath}")" ]; then
 			return 0 # already locked by this process
 		fi
 
@@ -57,10 +55,10 @@ function lock() {
 	fi
 
 	mkdir -p "$(dirname "${lockFilePath}")"
-	echo "${$}" > "${lockFilePath}"
+	echo "$$" > "${lockFilePath}"
 }
 
-function unlock() {
+unlock() {
 	logInfo "Unlocking 'EdgeCD'"
 	rm -f "$(__get_lock_file_path)"
 }

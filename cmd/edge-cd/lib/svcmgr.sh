@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
 # Copyright 2025 Alexandre Mahdhaoui
 #
@@ -19,8 +19,8 @@
 # Preambule
 # ------------------------------------------------------------------#
 
-declare -g __LOADED_LIB_SVCMGR=true
-SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
+__LOADED_LIB_SVCMGR=true
+SRC_DIR="${SRC_DIR:-$(dirname "$(readlink -f "$0")")}"
 LIB_DIR="${SRC_DIR}/lib"
 SVCMGR_DIR="${SRC_DIR}/service-managers"
 
@@ -35,35 +35,45 @@ SVCMGR_DIR="${SRC_DIR}/service-managers"
 # Service Manager
 # ------------------------------------------------------------------#
 
-declare __SVCMGR_NAME
-function __get_svc_mgr_name() {
-	echo "${__SVCMGR_NAME:=$(read_config '.serviceManager.name')}"
+__SVCMGR_NAME=""
+__get_svc_mgr_name() {
+	if [ -z "${__SVCMGR_NAME}" ]; then
+		__SVCMGR_NAME=$(read_config '.serviceManager.name')
+	fi
+	echo "${__SVCMGR_NAME}"
 }
 
-declare __SVCMGR_PATH
-function __get_svc_mgr_path() {
-	echo "${__SVCMGR_PATH:=${SVCMGR_DIR}/$(__get_svc_mgr_name)}"
+__SVCMGR_PATH=""
+__get_svc_mgr_path() {
+	if [ -z "${__SVCMGR_PATH}" ]; then
+		__SVCMGR_PATH="${SVCMGR_DIR}/$(__get_svc_mgr_name)"
+	fi
+	echo "${__SVCMGR_PATH}"
 }
 
-function __read_svc_mgr_config() {
-	local yamlPath="$1"
+__read_svc_mgr_config() {
+	yamlPath="$1"
 	read_yaml_file "${yamlPath}" "$(__get_svc_mgr_path)/config.yaml"
 }
 
-function restart_service() {
-	local serviceName="${1}"
+restart_service() {
+	serviceName="$1"
 	logInfo "Restarting service \"${serviceName}\""
 
-	local -a cmd
-	readarray -t cmd < <(__read_svc_mgr_config '.commands.restart' | yq -e -r '.[]' | sed -e "s/__SERVICE_NAME__/${serviceName}/g")
-	eval "${cmd[@]}"
+	# Build command from YAML array, replacing __SERVICE_NAME__
+	cmd=$(__read_svc_mgr_config '.commands.restart' | yq -e -r '.[]' | sed -e "s/__SERVICE_NAME__/${serviceName}/g" | tr '\n' ' ')
+
+	# Execute the built command
+	eval "${cmd}"
 }
 
-function enable_service() {
-	local serviceName="${1}"
+enable_service() {
+	serviceName="$1"
 	logInfo "Enabling service \"${serviceName}\""
 
-	local -a cmd
-	readarray -t cmd < <(__read_svc_mgr_config '.commands.enable' | yq -e -r '.[]' | sed -e "s/__SERVICE_NAME__/${serviceName}/g")
-	eval "${cmd[@]}"
+	# Build command from YAML array, replacing __SERVICE_NAME__
+	cmd=$(__read_svc_mgr_config '.commands.enable' | yq -e -r '.[]' | sed -e "s/__SERVICE_NAME__/${serviceName}/g" | tr '\n' ' ')
+
+	# Execute the built command
+	eval "${cmd}"
 }

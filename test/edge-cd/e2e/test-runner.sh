@@ -34,7 +34,7 @@ main() {
   else
     echo "[INFO] Testing edge-cd (shell implementation)"
     CONFIG_PATH=. CONFIG_REPO_DEST_PATH=/opt/config CONFIG_SPEC_FILE=config.yaml /opt/src/edge-cd/cmd/edge-cd/edge-cd 2>&1 | tee /tmp/edge-cd.log &
-    EDGE_CD_PROCESS_PATTERN="^bash /opt/src/edge-cd/cmd/edge-cd/edge-cd$"
+    EDGE_CD_PROCESS_PATTERN="/opt/src/edge-cd/cmd/edge-cd/edge-cd"
   fi
 
   # -- Wait for edge-cd to complete its first reconciliation loop
