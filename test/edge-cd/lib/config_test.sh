@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
 # Copyright 2025 Alexandre Mahdhaoui
 #
@@ -15,12 +15,13 @@
 # limitations under the License.
 #
 
-set -euo pipefail
+set -e
+set -u
 
 # --- Test Setup ---
 TMP_DIR=$(mktemp -d)
 # Copy the entire edge-cd directory to the temporary location
-cp -R "$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")")")/cmd/edge-cd" "${TMP_DIR}/edge-cd"
+cp -R "$(cd "$(dirname "$0")/../../.." && pwd)/cmd/edge-cd" "${TMP_DIR}/edge-cd"
 
 # Set up config path variables for testing
 # CONFIG_PATH is the relative directory path within the config repo
@@ -44,11 +45,11 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 . "${TMP_DIR}/edge-cd/lib/config.sh"
 
 # --- Test Helpers ---
-function assert_equals() {
-    local expected="$1"
-    local actual="$2"
-    local message="$3"
-    if [[ "$expected" != "$actual" ]]; then
+assert_equals() {
+    expected="$1"
+    actual="$2"
+    message="$3"
+    if [ "$expected" != "$actual" ]; then
         logErr "FAIL: ${message}"
         logErr "  Expected: '${expected}'"
         logErr "  Actual:   '${actual}'"
@@ -59,15 +60,15 @@ function assert_equals() {
     fi
 }
 
-function assert_error() {
-    local command="$1"
-    local message="$2"
+assert_error() {
+    command="$1"
+    message="$2"
     set +e # Temporarily disable exit on error
     eval "$command"
-    local exit_code=$?
+    exit_code=$?
     set -e # Re-enable exit on error
 
-    if [[ "$exit_code" -ne 0 ]]; then
+    if [ "$exit_code" -ne 0 ]; then
         logInfo "PASS: ${message} - Command failed as expected with exit code ${exit_code}."
         return 0
     else
@@ -98,7 +99,7 @@ ACTUAL=$(read_yaml_stdin ".flag" "${YAML_CONTENT}")
 assert_equals "${EXPECTED}" "${ACTUAL}" "read_yaml_stdin should read a boolean"
 
 # Test 1.4: Read a nested string
-YAML_CONTENT="parent:\n  child: nested_value"
+YAML_CONTENT=$(printf "parent:\n  child: nested_value")
 EXPECTED="nested_value"
 ACTUAL=$(read_yaml_stdin ".parent.child" "${YAML_CONTENT}")
 assert_equals "${EXPECTED}" "${ACTUAL}" "read_yaml_stdin should read a nested string"
@@ -279,7 +280,7 @@ ACTUAL=$(read_value TEST_VAR_5_2 ".key_5_2" "default_value_5_2")
 assert_equals "${EXPECTED}" "${ACTUAL}" "read_value should prioritize Config (5.2)"
 
 # Test 5.3: Env Var unset, Config unset, Default provided.
-rm "$(get_config_spec_abspath)"
+rm -f "$(get_config_spec_abspath)"
 EXPECTED="default_value_5_3"
 ACTUAL=$(read_value TEST_VAR_5_3 ".key_5_3" "default_value_5_3")
 assert_equals "${EXPECTED}" "${ACTUAL}" "read_value should use Default (5.3)"
@@ -291,7 +292,7 @@ if (read_value TEST_VAR_5_4 ".key_5_4") 2>/dev/null; then
     logErr "FAIL: read_value should exit 1 if no value found (5.4) - Expected error, but command succeeded."
 else
     exit_code=$?
-    if [[ "$exit_code" -ne 0 ]]; then
+    if [ "$exit_code" -ne 0 ]; then
         logInfo "PASS: read_value should exit 1 if no value found (5.4) - Command failed as expected with exit code ${exit_code}."
     else
         logErr "FAIL: read_value should exit 1 if no value found (5.4) - Expected error, but command succeeded with exit code ${exit_code}."
@@ -330,7 +331,7 @@ EOF
 set_extra_envs
 assert_equals "new_value" "${MY_VAR}" "set_extra_envs: unset variable becomes new_value"
 reset_extra_envs
-if [[ -z ${MY_VAR+x} ]]; then
+if [ -z "${MY_VAR+x}" ]; then
     logInfo "PASSED: reset_extra_envs: variable unset after reset"
 else
     logErr "FAILED: reset_extra_envs: variable should be unset after reset"
@@ -361,7 +362,7 @@ set_extra_envs
 assert_equals "new_value1" "${MY_VAR1}" "set_extra_envs: multiple variables - MY_VAR1"
 assert_equals "new_value2" "${MY_VAR2}" "set_extra_envs: multiple variables - MY_VAR2"
 reset_extra_envs
-if [[ -z ${MY_VAR1+x} ]]; then
+if [ -z "${MY_VAR1+x}" ]; then
     logInfo "PASSED: reset_extra_envs: multiple variables - MY_VAR1 unset after reset"
 else
     logErr "FAILED: reset_extra_envs: multiple variables - MY_VAR1 should be unset after reset"
@@ -369,7 +370,7 @@ else
     exit 1
 fi
 # Direct check for MY_VAR2
-if [[ "${MY_VAR2}" == "original_value2" ]]; then
+if [ "${MY_VAR2}" = "original_value2" ]; then
     logInfo "PASSED: reset_extra_envs: multiple variables - MY_VAR2 restored"
 else
     logErr "FAILED: reset_extra_envs: multiple variables - MY_VAR2 not restored"
@@ -407,12 +408,12 @@ logInfo "Running Task 8: Test logInfo and logErr (JSON Format)"
 export LOG_FORMAT="json"
 
 # Test Case 8.1: logInfo JSON output
-EXPECTED='{"level":"info","message":"Test\ info\ message"}'
+EXPECTED='{"level":"info","message":"Test info message"}'
 ACTUAL=$( { logInfo "Test info message" 1>&2; } 2>&1 )
 assert_equals "${EXPECTED}" "${ACTUAL}" "logInfo JSON output"
 
 # Test Case 8.2: logErr JSON output
-EXPECTED='{"level":"error","message":"Test\ error\ message"}'
+EXPECTED='{"level":"error","message":"Test error message"}'
 ACTUAL=$( { logErr "Test error message" 1>&2; } 2>&1 )
 assert_equals "${EXPECTED}" "${ACTUAL}" "logErr JSON output"
 

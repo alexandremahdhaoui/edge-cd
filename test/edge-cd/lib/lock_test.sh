@@ -1,11 +1,12 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -e
+set -u
 
 # Source the log.sh for logging functions
-. "$(dirname "${BASH_SOURCE[0]}")/../../../cmd/edge-cd/lib/log.sh"
+. "$(dirname "$0")/../../../cmd/edge-cd/lib/log.sh"
 
 # Define SRC_DIR relative to the test script
-SRC_DIR="$(dirname "${BASH_SOURCE[0]}")/../../.."
+SRC_DIR="$(dirname "$0")/../../.."
 
 # General Test Setup
 # Create a temporary directory and copy project files
@@ -20,10 +21,10 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 
 # Helper function for assertions
 assert_equals() {
-    local expected="$1"
-    local actual="$2"
-    local message="$3"
-    if [[ "$expected" == "$actual" ]]; then
+    expected="$1"
+    actual="$2"
+    message="$3"
+    if [ "$expected" = "$actual" ]; then
         logInfo "PASS: ${message}"
     else
         logErr "FAIL: ${message}"
@@ -34,9 +35,9 @@ assert_equals() {
 }
 
 assert_empty() {
-    local actual="$1"
-    local message="$2"
-    if [[ -z "$actual" ]]; then
+    actual="$1"
+    message="$2"
+    if [ -z "$actual" ]; then
         logInfo "PASS: ${message}"
     else
         logErr "FAIL: ${message}"
@@ -47,9 +48,9 @@ assert_empty() {
 }
 
 assert_not_empty() {
-    local actual="$1"
-    local message="$2"
-    if [[ -n "$actual" ]]; then
+    actual="$1"
+    message="$2"
+    if [ -n "$actual" ]; then
         logInfo "PASS: ${message}"
     else
         logErr "FAIL: ${message}"
@@ -60,14 +61,14 @@ assert_not_empty() {
 }
 
 assert_exit_code() {
-    local expected_code="$1"
-    local command="$2"
-    local message="$3"
+    expected_code="$1"
+    command="$2"
+    message="$3"
     set +e # Disable exit on error for this check
     ( eval "$command" )
-    local actual_code=$?
+    actual_code=$?
     set -e # Re-enable exit on error
-    if [[ "$expected_code" -eq "$actual_code" ]]; then
+    if [ "$expected_code" -eq "$actual_code" ]; then
         logInfo "PASS: ${message} (Exit code: $actual_code)"
     else
         logErr "FAIL: ${message} (Expected exit code: $expected_code, Actual: $actual_code)"
@@ -106,7 +107,7 @@ rm -f "${LOCK_FILE_PATH}" # Ensure no lock file exists
 lock
 
 # Assert that the lock file is created
-if [[ -f "${LOCK_FILE_PATH}" ]]; then
+if [ -f "${LOCK_FILE_PATH}" ]; then
     logInfo "PASS: lock: lock file created"
 else
     logErr "FAIL: lock: lock file not created"

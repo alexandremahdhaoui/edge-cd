@@ -135,6 +135,11 @@ read_yaml_file() {
 read_yaml_file_optional() {
 	yamlPath="$1"
 	yamlFile="$2"
+	# Check if file exists before calling yq
+	if [ ! -f "${yamlFile}" ]; then
+		echo "null"
+		return 0
+	fi
 	yq "${yamlPath}" "${yamlFile}"
 }
 

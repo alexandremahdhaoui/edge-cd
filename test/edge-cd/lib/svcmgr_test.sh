@@ -1,11 +1,12 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -e
+set -u
 
 # Source the log.sh for logging functions
-. "$(dirname "${BASH_SOURCE[0]}")/../../../cmd/edge-cd/lib/log.sh"
+. "$(dirname "$0")/../../../cmd/edge-cd/lib/log.sh"
 
 # Define SRC_DIR relative to the test script
-SRC_DIR="$(dirname "${BASH_SOURCE[0]}")/../../.."
+SRC_DIR="$(dirname "$0")/../../.."
 
 # General Test Setup
 # Create a temporary directory and copy project files
@@ -35,10 +36,10 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 
 # Helper function for assertions
 assert_equals() {
-    local expected="$1"
-    local actual="$2"
-    local message="$3"
-    if [[ "$expected" == "$actual" ]]; then
+    expected="$1"
+    actual="$2"
+    message="$3"
+    if [ "$expected" = "$actual" ]; then
         logInfo "PASS: ${message}"
     else
         logErr "FAIL: ${message}"
@@ -49,9 +50,9 @@ assert_equals() {
 }
 
 assert_empty() {
-    local actual="$1"
-    local message="$2"
-    if [[ -z "$actual" ]]; then
+    actual="$1"
+    message="$2"
+    if [ -z "$actual" ]; then
         logInfo "PASS: ${message}"
     else
         logErr "FAIL: ${message}"
@@ -62,9 +63,9 @@ assert_empty() {
 }
 
 assert_not_empty() {
-    local actual="$1"
-    local message="$2"
-    if [[ -n "$actual" ]]; then
+    actual="$1"
+    message="$2"
+    if [ -n "$actual" ]; then
         logInfo "PASS: ${message}"
     else
         logErr "FAIL: ${message}"
@@ -75,14 +76,14 @@ assert_not_empty() {
 }
 
 assert_exit_code() {
-    local expected_code="$1"
-    local command="$2"
-    local message="$3"
+    expected_code="$1"
+    command="$2"
+    message="$3"
     set +e # Disable exit on error for this check
-    ( eval "$command" ) &> /dev/null # Redirect stdout/stderr to null for this check
-    local actual_code=$?
+    ( eval "$command" ) > /dev/null 2>&1 # Redirect stdout/stderr to null for this check
+    actual_code=$?
     set -e # Re-enable exit on error
-    if [[ "$expected_code" -eq "$actual_code" ]]; then
+    if [ "$expected_code" -eq "$actual_code" ]; then
         logInfo "PASS: ${message} (Exit code: $actual_code)"
     else
         logErr "FAIL: ${message} (Expected exit code: $expected_code, Actual: $actual_code)"
@@ -91,22 +92,24 @@ assert_exit_code() {
 }
 
 assert_stderr_contains() {
-    local expected_substring="$1"
-    local command="$2"
-    local message="$3"
+    expected_substring="$1"
+    command="$2"
+    message="$3"
     set +e
-    local stderr_output
     stderr_output=$( ( eval "$command" ) 2>&1 >/dev/null )
-    local actual_code=$?
+    actual_code=$?
     set -e
-    if [[ "$stderr_output" == *"$expected_substring"* ]]; then
-        logInfo "PASS: ${message}"
-    else
-        logErr "FAIL: ${message}"
-        logErr "  Expected stderr to contain: '${expected_substring}'"
-        logErr "  Actual stderr: '${stderr_output}'"
-        exit 1
-    fi
+    case "$stderr_output" in
+        *"$expected_substring"*)
+            logInfo "PASS: ${message}"
+            ;;
+        *)
+            logErr "FAIL: ${message}"
+            logErr "  Expected stderr to contain: '${expected_substring}'"
+            logErr "  Actual stderr: '${stderr_output}'"
+            exit 1
+            ;;
+    esac
 }
 
 logInfo "Starting svcmgr.sh unit tests..."
