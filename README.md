@@ -92,6 +92,56 @@ The `bootstrap` command accepts the following flags:
 | `--user-config-repo-dest`| The destination path for the user config repository on the target device.                                | No       |
 | `--inject-prepend-cmd`   | A command to prepend to privileged operations (e.g., `sudo`).                                            | No       |
 | `--inject-env`           | Environment variables to inject on the target device (e.g., `GIT_SSH_COMMAND=...`).                      | No       |
+| `--posix`                | Install POSIX shell implementation of edge-cd with posix-yq instead of standard yq.                      | No       |
+
+### POSIX Shell Implementation
+
+EdgeCD supports a POSIX-compliant shell implementation for resource-constrained devices such as routers, embedded systems, and devices running BusyBox.
+
+**When to use `--posix`:**
+- OpenWrt routers
+- Embedded Linux devices with limited resources
+- Systems running BusyBox
+- Devices without package manager support for standard yq
+- Air-gapped environments (after initial posix-yq download)
+
+**What gets installed with `--posix`:**
+- **posix-yq**: A pure POSIX shell implementation of yq for YAML parsing
+  - No binary dependencies
+  - Works with busybox, ash, dash, and other POSIX shells
+  - Lighter weight than standard yq
+- **Edge-CD shell scripts**: POSIX-compliant shell implementation instead of Go binaries
+
+**Usage example:**
+
+```bash
+edgectl bootstrap --posix \
+  --target-addr 192.168.1.100 \
+  --target-user root \
+  --ssh-private-key ~/.ssh/id_ed25519 \
+  --config-repo git@github.com:myorg/edge-cd-config.git \
+  --packages git,curl \
+  --service-manager procd \
+  --package-manager opkg
+```
+
+**Requirements:**
+- Wget installed on target device
+- Internet access for initial posix-yq download (or manual installation)
+- POSIX-compliant shell (sh, ash, dash, bash, etc.)
+
+**Troubleshooting:**
+
+If posix-yq installation fails:
+1. Check network connectivity to GitHub
+2. Verify wget is installed: `which wget`
+3. Manually install posix-yq:
+   ```bash
+   wget -qO /usr/local/bin/yq https://raw.githubusercontent.com/alexandremahdhaoui/posix-yq/refs/tags/v0.1.0/posix-yq
+   chmod a+x /usr/local/bin/yq
+   ```
+
+For more information on posix-yq, see: https://github.com/alexandremahdhaoui/posix-yq
 
 ### Manual Installation
 
