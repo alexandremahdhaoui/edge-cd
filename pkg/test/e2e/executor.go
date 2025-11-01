@@ -639,6 +639,32 @@ func pushChangesToGitRepo(
 		return fmt.Errorf("failed to stage changes: %w", err)
 	}
 
+	// Check if there are any staged changes
+	// This handles the idempotent case where the same changes are applied twice
+	// git diff --cached --exit-code: returns 0 if no diff, 1 if there is a diff
+	diffCmd := exec.Command("git", "diff", "--cached", "--exit-code")
+	diffCmd.Dir = tempDir
+	diffCmd.Env = gitEnv
+	diffErr := diffCmd.Run()
+
+	if diffErr == nil {
+		// Exit code 0: no staged changes
+		// This is an idempotent scenario - the files already exist in the repository with this content
+		slog.Info("no staged changes detected for scenario - files already in repository", "url", gitRepoURL)
+		return nil
+	}
+
+	// Check if it's an exit error (expected when there are changes)
+	exeErr, ok := diffErr.(*exec.ExitError)
+	if !ok {
+		return fmt.Errorf("failed to check staged changes: %w", diffErr)
+	}
+
+	// Exit code 1 means there are changes - continue to commit
+	if exeErr.ExitCode() != 1 {
+		return fmt.Errorf("unexpected exit code from git diff --cached --exit-code: %d", exeErr.ExitCode())
+	}
+
 	// Commit changes
 	commitCmd := exec.Command("git", "commit", "-m", commitMessage)
 	commitCmd.Dir = tempDir
@@ -646,6 +672,12 @@ func pushChangesToGitRepo(
 	commitCmd.Stdout = os.Stdout
 	commitCmd.Stderr = os.Stderr
 	if err := commitCmd.Run(); err != nil {
+		// Fallback: Check if this is a "nothing to commit" error (defensive, should have been caught by diff check)
+		// This handles any edge cases where git diff didn't detect all changes correctly
+		if strings.Contains(err.Error(), "nothing to commit") {
+			slog.Warn("commit failed with 'nothing to commit' (fallback case)", "url", gitRepoURL)
+			return nil
+		}
 		return fmt.Errorf("failed to commit changes: %w", err)
 	}
 
@@ -679,6 +711,21 @@ func executeReconciliationTest(
 		return fmt.Errorf("initial reconciliation failed for scenario %q: %w", scenario.Name, err)
 	}
 	slog.Info("initial reconciliation complete")
+
+	// Step 1.5: Detect if scenario has been previously applied
+	// This helps identify reruns and provides visibility into idempotent behavior
+	alreadyApplied := true
+	for targetPath, expectedContent := range scenario.ExpectedTargetFiles {
+		if err := verifyFileContent(ctx, sshClient, targetPath, expectedContent); err != nil {
+			alreadyApplied = false
+			break
+		}
+	}
+	if alreadyApplied && len(scenario.ExpectedTargetFiles) > 0 {
+		slog.Info("scenario may have been previously applied - all expected files already exist with correct content",
+			"name", scenario.Name,
+			"fileCount", len(scenario.ExpectedTargetFiles))
+	}
 
 	// Step 2: Push changes to git repo
 	slog.Debug("Pushing changes to git repository")

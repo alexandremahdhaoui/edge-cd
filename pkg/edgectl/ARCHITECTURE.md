@@ -6,6 +6,8 @@ This document outlines key architectural decisions for the `edgectl` CLI tool, s
 
 **Decision**: `edgectl bootstrap` will primarily rely on **pre-flight checks** for each operation to ensure idempotency.
 
+**Status**: ✅ **Fully Implemented and Tested**
+
 **Explanation**:
 Instead of maintaining a remote state file (like the `bootstrap-router` shell scripts), each step in the `bootstrap` process will first check the current state of the remote device. For example:
 - Before installing a package, it will check if the package is already installed.
@@ -13,6 +15,127 @@ Instead of maintaining a remote state file (like the `bootstrap-router` shell sc
 - Before enabling a service, it will check if the service is already enabled.
 
 This approach simplifies the state management on the remote device and makes each operation self-contained and repeatable without side effects if run multiple times.
+
+### Implementation Pattern
+
+All idempotent operations follow this consistent pattern:
+
+```go
+// Pre-flight check: Verify current state
+_, _, err := runner.Run(execCtx, "test", "-d", resourcePath)
+if err != nil {
+    // Resource doesn't exist - create it
+    slog.Info("creating resource", "path", resourcePath)
+    stdout, stderr, createErr := runner.Run(execCtx, "create-command", ...)
+    if createErr != nil {
+        return handleError(createErr, stdout, stderr)
+    }
+} else {
+    // Resource exists - update it
+    slog.Info("resource already exists, updating", "path", resourcePath)
+    stdout, stderr, updateErr := runner.Run(execCtx, "update-command", ...)
+    if updateErr != nil {
+        // Log warning but continue (resource is usable)
+        slog.Warn("failed to update resource", "path", resourcePath, "stderr", stderr)
+    }
+}
+```
+
+### Idempotent Operations
+
+**1. Git Repository Operations**
+
+*Reference Implementation*: `CloneOrPullRepo()` in `provision/git.go:30-69`
+
+```go
+// Line 38: Check if repository exists
+_, _, err = runner.Run(execCtx, "test", "-d", destPath)
+if err != nil {
+    // Line 42: Clone if doesn't exist
+    runner.Run(execCtx, "git", "clone", repoURL, destPath)
+} else {
+    // Line 55: Pull if exists
+    runner.Run(execCtx, "git", "-C", destPath, "pull")
+}
+```
+
+This pattern is used in:
+- `CloneOrPullRepo()` - User configuration repository (git.go:30-69)
+- `ProvisionPackages()` - Edge-CD repository clone (packages.go:78-95)
+
+**2. Binary Installation**
+
+*Reference Implementation*: `InstallYq()` in `provision/packages.go:117-162`
+
+```go
+// Line 126: Check if yq is already installed
+_, _, err := runner.Run(execCtx, "which", "yq")
+if err == nil {
+    // Line 128: Skip installation
+    slog.Info("yq is already installed, skipping installation")
+    return nil
+}
+// Line 135: Download and install yq
+runner.Run(execCtx, "wget", "-qO", "/usr/local/bin/yq", ...)
+```
+
+**3. Package Installation**
+
+*Implementation*: `ProvisionPackages()` in `provision/packages.go:60-115`
+
+Package managers (apt, opkg) are inherently idempotent:
+- `apt-get install -y <package>`: Returns exit code 0 if package already installed
+- `opkg install <package>`: Skips already-installed packages
+
+No pre-flight check needed; the package manager handles this internally.
+
+**4. Configuration File Placement**
+
+*Implementation*: `PlaceConfigYAML()` in `provision/config.go:96-117`
+
+```go
+// Line 104: mkdir -p is idempotent
+runner.Run(execCtx, "mkdir", "-p", "/etc/edge-cd")
+
+// Line 112: File overwrite is idempotent
+runner.Run(execCtx, "base64", "-d", "|", "tee", "/etc/edge-cd/config.yaml")
+```
+
+**5. Service Management**
+
+*Implementation*: `SetupEdgeCDService()` in `provision/service.go:64-123`
+
+Systemd commands are inherently idempotent:
+- `systemctl enable edge-cd`: Succeeds if already enabled
+- `systemctl start edge-cd`: Succeeds if already running
+
+Procd uses `restart` instead of `start` to ensure clean state.
+
+### Testing
+
+Idempotency is validated at multiple levels:
+
+**Unit Tests**: Each operation has dedicated idempotency tests
+```bash
+go test -v ./pkg/edgectl/provision -run Idempotent
+```
+
+Example: `TestProvisionPackages` (packages_test.go:113-160) verifies:
+- First call: Directory doesn't exist → executes `git clone`
+- Second call: Directory exists → executes `git pull` (not clone)
+
+**E2E Tests**: Full bootstrap tested with reconciliation scenarios
+```bash
+make test-e2e
+```
+
+E2E tests verify bootstrap can be run multiple times without errors.
+
+### Documentation
+
+For complete idempotency documentation, see:
+- **provision/IDEMPOTENCY.md** - Detailed idempotency guarantees, testing procedures, and examples
+- **Analysis documents** in `.ai/plan/bootstrap-idempotency/` - Investigation and verification of each operation
 
 ## 2. Unit Testing Strategy
 

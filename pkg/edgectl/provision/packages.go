@@ -73,13 +73,74 @@ func ProvisionPackages(
 		return err
 	}
 
-	// Clone the edge-cd repository to its destination path on the remote device
-	slog.Info("cloning edge-cd repository to remote", "url", remoteEdgeCDRepoURL, "destPath", remoteEdgeCDRepoDestPath)
+	// Clone or sync the edge-cd repository on the remote device (idempotency check)
+	// Uses sparse checkout to only fetch cmd/edge-cd directory
+	// Check if repository already exists
+	_, _, err = runner.Run(execCtx, "test", "-d", remoteEdgeCDRepoDestPath)
+	if err != nil {
+		// Directory does not exist, clone it with sparse checkout
+		slog.Info("cloning edge-cd repository to remote with sparse checkout", "url", remoteEdgeCDRepoURL, "destPath", remoteEdgeCDRepoDestPath)
 
-	// Execute with the provided context
-	stdout, stderr, cloneErr := runner.Run(execCtx, "git", "clone", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath)
-	if cloneErr != nil {
-		return flaterrors.Join(cloneErr, fmt.Errorf("url=%s stdout=%s stderr=%s", remoteEdgeCDRepoURL, stdout, stderr), errCloneEdgeCDRepo)
+		// git clone --filter=blob:none --no-checkout
+		stdout, stderr, cloneErr := runner.Run(execCtx, "git", "clone", "--filter=blob:none", "--no-checkout", remoteEdgeCDRepoURL, remoteEdgeCDRepoDestPath)
+		if cloneErr != nil {
+			return flaterrors.Join(cloneErr, fmt.Errorf("url=%s stdout=%s stderr=%s", remoteEdgeCDRepoURL, stdout, stderr), errCloneEdgeCDRepo)
+		}
+
+		// git sparse-checkout init
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", remoteEdgeCDRepoDestPath, "sparse-checkout", "init")
+		if err != nil {
+			return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", remoteEdgeCDRepoDestPath, stdout, stderr), errCloneEdgeCDRepo)
+		}
+
+		// git sparse-checkout set "cmd/edge-cd"
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", remoteEdgeCDRepoDestPath, "sparse-checkout", "set", "cmd/edge-cd")
+		if err != nil {
+			return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", remoteEdgeCDRepoDestPath, stdout, stderr), errCloneEdgeCDRepo)
+		}
+
+		// git checkout main
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", remoteEdgeCDRepoDestPath, "checkout", "main")
+		if err != nil {
+			return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", remoteEdgeCDRepoDestPath, stdout, stderr), errCloneEdgeCDRepo)
+		}
+
+		// git fetch origin main
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", remoteEdgeCDRepoDestPath, "fetch", "origin", "main")
+		if err != nil {
+			return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", remoteEdgeCDRepoDestPath, stdout, stderr), errCloneEdgeCDRepo)
+		}
+
+		// git pull (final sync after checkout)
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", remoteEdgeCDRepoDestPath, "pull")
+		if err != nil {
+			return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", remoteEdgeCDRepoDestPath, stdout, stderr), errCloneEdgeCDRepo)
+		}
+
+		slog.Info("edge-cd repository cloned successfully with sparse checkout", "destPath", remoteEdgeCDRepoDestPath)
+	} else {
+		// Directory exists, sync it using fetch + reset (idempotent and robust)
+		slog.Info("edge-cd repository already exists, syncing latest changes", "destPath", remoteEdgeCDRepoDestPath)
+
+		// git sparse-checkout set "cmd/edge-cd"
+		stdout, stderr, err := runner.Run(execCtx, "git", "-C", remoteEdgeCDRepoDestPath, "sparse-checkout", "set", "cmd/edge-cd")
+		if err != nil {
+			return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", remoteEdgeCDRepoDestPath, stdout, stderr), errCloneEdgeCDRepo)
+		}
+
+		// git fetch origin main
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", remoteEdgeCDRepoDestPath, "fetch", "origin", "main")
+		if err != nil {
+			return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", remoteEdgeCDRepoDestPath, stdout, stderr), errCloneEdgeCDRepo)
+		}
+
+		// git reset --hard FETCH_HEAD (force update to match remote exactly)
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", remoteEdgeCDRepoDestPath, "reset", "--hard", "FETCH_HEAD")
+		if err != nil {
+			return flaterrors.Join(err, fmt.Errorf("destPath=%s stdout=%s stderr=%s", remoteEdgeCDRepoDestPath, stdout, stderr), errCloneEdgeCDRepo)
+		}
+
+		slog.Info("edge-cd repository synced successfully", "destPath", remoteEdgeCDRepoDestPath)
 	}
 
 	// Update package manager repos once

@@ -27,18 +27,22 @@ type GitRepo struct {
 //
 // This function properly composes both the prepend command and environment variables into the remote execution
 // via the Context and SSH Run interface.
+//
+// Uses robust fetch + reset approach for syncing existing repositories, which cannot fail due to:
+// - Merge conflicts
+// - Local modifications
+// - Detached HEAD state
 func CloneOrPullRepo(
 	execCtx execcontext.Context,
 	runner ssh.Runner,
 	destPath string,
 	repo GitRepo,
 ) error {
-	var op string
 	// Check if repository already exists
 	_, _, err := runner.Run(execCtx, "test", "-d", destPath)
-	if err != nil { // Directory does not exist, so clone
-		// Clone the repository
-				slog.Info("cloning repository", "url", repo.URL, "branch", repo.Branch, "destPath", destPath)
+	if err != nil {
+		// Directory does not exist, clone it
+		slog.Info("cloning repository", "url", repo.URL, "branch", repo.Branch, "destPath", destPath)
 		stdout, stderr, cloneErr := runner.Run(execCtx, "git", "clone", "-b", repo.Branch, repo.URL, destPath)
 		if cloneErr != nil {
 			return flaterrors.Join(
@@ -48,22 +52,57 @@ func CloneOrPullRepo(
 				errCloneOrPullRepo,
 			)
 		}
-	} else {
-		// Directory exists, so pull
-		op = "pull"
-				slog.Info("pulling repository", "url", repo.URL, "branch", repo.Branch, "destPath", destPath)
-		stdout, stderr, pullErr := runner.Run(execCtx, "git", "-C", destPath, "pull")
-		if pullErr != nil {
+
+		// After clone, fetch and pull to ensure up to date
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", destPath, "fetch", "origin", repo.Branch)
+		if err != nil {
 			return flaterrors.Join(
-				pullErr,
+				err,
+				fmt.Errorf("url=%s branch=%s stdout=%s stderr=%s", repo.URL, repo.Branch, stdout, stderr),
+				errCloneRepo,
+				errCloneOrPullRepo,
+			)
+		}
+
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", destPath, "pull")
+		if err != nil {
+			return flaterrors.Join(
+				err,
+				fmt.Errorf("url=%s branch=%s stdout=%s stderr=%s", repo.URL, repo.Branch, stdout, stderr),
+				errCloneRepo,
+				errCloneOrPullRepo,
+			)
+		}
+
+		slog.Info("repository cloned successfully", "url", repo.URL, "branch", repo.Branch, "destPath", destPath)
+	} else {
+		// Directory exists, sync it using fetch + reset (idempotent and robust)
+		slog.Info("repository already exists, syncing latest changes", "url", repo.URL, "branch", repo.Branch, "destPath", destPath)
+
+		// git fetch origin <branch>
+		stdout, stderr, err := runner.Run(execCtx, "git", "-C", destPath, "fetch", "origin", repo.Branch)
+		if err != nil {
+			return flaterrors.Join(
+				err,
 				fmt.Errorf("url=%s branch=%s stdout=%s stderr=%s", repo.URL, repo.Branch, stdout, stderr),
 				errPullRepo,
 				errCloneOrPullRepo,
 			)
 		}
-	}
 
-	slog.Info("successfully cloned/pulled repository", "url", repo.URL, "branch", repo.Branch, "operation", op)
+		// git reset --hard FETCH_HEAD (force update to match remote exactly)
+		stdout, stderr, err = runner.Run(execCtx, "git", "-C", destPath, "reset", "--hard", "FETCH_HEAD")
+		if err != nil {
+			return flaterrors.Join(
+				err,
+				fmt.Errorf("url=%s branch=%s stdout=%s stderr=%s", repo.URL, repo.Branch, stdout, stderr),
+				errPullRepo,
+				errCloneOrPullRepo,
+			)
+		}
+
+		slog.Info("repository synced successfully", "url", repo.URL, "branch", repo.Branch, "destPath", destPath)
+	}
 
 	return nil
 }
